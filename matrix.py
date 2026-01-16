@@ -1,5 +1,6 @@
 from typing import TypeVar, Generic, Sequence, overload, Callable, Any, cast, Literal
 from .number_system import *
+from .config import CONFIG
 
 _T_Ring = TypeVar("_T_Ring", bound=Ring)
 _T_Field = TypeVar("_T_Field", bound=Field)
@@ -17,6 +18,13 @@ class Vector(Generic[_T_Ring]):
         self, *data: Any, num_type: Callable[[_T_In], _T_Ring] | None = None
     ) -> None:
         self._data = [(num_type(item) if num_type else item) for item in data]
+
+    def __repr__(self) -> str:
+        match CONFIG["repr_type"]:
+            case "default":
+                return f"({' '.join(str(i) for i in self._data)})"
+            case "latex":
+                return f"\\begin{{pmatrix}}{'\\\\'.join(str(i) for i in self._data)}\\end{{pmatrix}}"
 
     def __len__(self) -> int:
         return len(self._data)
@@ -80,18 +88,22 @@ class Matrix(Generic[_T_Ring]):
         self.num_type = num_type or type(self[0, 0])
 
     def __repr__(self):
-        max_width = 0
-        for row in self._data:
-            for item in row:
-                max_width = max(max_width, len(str(item)))
+        match CONFIG["repr_type"]:
+            case "default":
+                max_width = 0
+                for row in self._data:
+                    for item in row:
+                        max_width = max(max_width, len(str(item)))
 
-        ans = ""
-        for row in self._data:
-            ans += "( "
-            for item in row:
-                ans += str(item).ljust(max_width) + " "
-            ans += ")\n"
-        return ans[:-1]
+                ans = ""
+                for row in self._data:
+                    ans += "( "
+                    for item in row:
+                        ans += str(item).ljust(max_width) + " "
+                    ans += ")\n"
+                return ans[:-1]
+            case "latex":
+                return "\\begin{pmatrix}"+"\\\\".join('&'.join(str(i) for i in row) for row in self._data)+"\\end{pmatrix}"
 
     def __getitem__(self, pos: tuple):
         row, col = pos
@@ -165,9 +177,11 @@ class Matrix(Generic[_T_Ring]):
         data = tuple(tuple(int(i == j) for j in range(size)) for i in range(size))
         return Matrix(*data, num_type=num_type)
 
-    def __pow__(self: 'Matrix[_T_Field]', other: Literal['T',-1]) -> "Matrix[_T_Ring] | Matrix[_T_Field]":
+    def __pow__(
+        self: "Matrix[_T_Field]", other: Literal["T", -1]
+    ) -> "Matrix[_T_Ring] | Matrix[_T_Field]":
         match other:
-            case 'T':
+            case "T":
                 return Matrix(
                     *(
                         [self._data[j][i] for j in range(self.rows)]
@@ -181,7 +195,7 @@ class Matrix(Generic[_T_Ring]):
 
                 from .gaussian_elim import to_rref
 
-                ops = to_rref(self,allow_zeroes=False)[1]
+                ops = to_rref(self, allow_zeroes=False)[1]
                 inv = Matrix.ident(
                     self.rows, cast("Callable[[int], _T_Field]", self.num_type)
                 )
@@ -191,7 +205,28 @@ class Matrix(Generic[_T_Ring]):
 
         return NotImplemented
 
+    def null(self) -> list[Vector]:
+        params = {}
+        pivots = {}
+        for i in range(self.rows):
+            for j in range(self.cols):
+                if self[i, j] == self.num_type(1):
+                    pivots[j] = i
+                    break
+        for j in range(self.cols):
+            if j not in pivots:
+                params.setdefault(j, [self.num_type(0)] * self.cols)[j] = self.num_type(
+                    1
+                )
+            else:
+                for j_ in range(j + 1, self.cols):
+                    if self[pivots[j], j_] != self.num_type(0):
+                        params.setdefault(j_, [self.num_type(0)] * self.cols)[j] = (
+                            -self[pivots[j], j_]
+                        )
+        return [Vector(*params[k]) for k in params]
 
-T = 'T'
+
+T = "T"
 
 __all__ = ["Vector", "Matrix", "T"]
