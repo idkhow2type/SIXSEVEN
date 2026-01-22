@@ -1,5 +1,6 @@
 from fractions import Fraction
-from typing import Protocol, Self
+from typing import Protocol, Self, Callable, Any
+
 
 class Ring(Protocol):
     def __add__(self, other: Self, /) -> Self: ...
@@ -8,6 +9,7 @@ class Ring(Protocol):
     def __rsub__(self, other: Self, /) -> Self: ...
     def __mul__(self, other: Self, /) -> Self: ...
     def __rmul__(self, other: Self, /) -> Self: ...
+
 
 # TODO: this obviously doesnt support ints, and floats look ugly, so make a real type wrapper
 class Field(Ring, Protocol):
@@ -93,10 +95,122 @@ def Zmod(base: int, start=0):
     return _Zmod
 
 
+class Atom:
+    def __init__(self, value) -> None:
+        self.value = value
+
+    def __repr__(self) -> str:
+        return str(self.value)
+
+
+class BinOp:
+    def __init__(self, left: "Expr", op: str, right: "Expr") -> None:
+        self.left = left
+        self.op = op
+        self.right = right
+
+    def __repr__(self) -> str:
+        return f"({str(self.left) + self.op + str(self.right)})"
+
+
+Expr = Atom | BinOp
+
+class Symbol:
+    def __init__(self, symbol: Any | Expr, reducer: Callable[[Expr], Expr]) -> None:
+        # Note: terms should always be reduced
+        self.expr: Expr = (
+            symbol if isinstance(symbol, Expr) else Atom(symbol)
+        )
+        self.reducer = reducer
+
+    def __repr__(self) -> str:
+        return str(self.expr)
+
+    def __eq__(self, value: object) -> bool:
+        return (
+            type(value) == Symbol
+            and self.expr == value.expr
+            and self.reducer == value.reducer
+        )
+
+    def _compute(self, value: "Symbol | Any", op: str, swap=False):
+        if type(value) == Symbol:
+            if value.reducer != self.reducer:
+                raise ValueError
+            left = self.expr
+            right = value.expr
+        else:
+            left = self.expr
+            right = Atom(value)
+
+        if swap:
+            left, right = right, left
+
+        return Symbol(self.reducer(BinOp(left, op, right)), self.reducer)
+
+    def __add__(self, value: "Symbol | Any"):
+        return self._compute(value, "+")
+
+    def __radd__(self, value: "Symbol | Any"):
+        return self._compute(value, "+", swap=True)
+
+    def __sub__(self, value: "Symbol | Any"):
+        return self._compute(value, "-")
+
+    def __rsub__(self, value: "Symbol | Any"):
+        return self._compute(value, "-", swap=True)
+
+    def __mul__(self, value: "Symbol | Any"):
+        return self._compute(value, "*")
+
+    def __rmul__(self, value: "Symbol | Any"):
+        return self._compute(value, "*", swap=True)
+
+    def __matmul__(self, value: "Symbol | Any"):
+        return self._compute(value, "@")
+
+    def __rmatmul__(self, value: "Symbol | Any"):
+        return self._compute(value, "@", swap=True)
+
+
+def basic_generic_reducer(expr: Expr) -> Expr:
+    if type(expr) == Atom:
+        return expr
+    assert type(expr) == BinOp
+    left = basic_generic_reducer(expr.left)
+    right = basic_generic_reducer(expr.right)
+    if type(left) == Atom and type(right) == Atom:
+        try:
+            ops = {
+                "+": lambda x, y: x + y,
+                "-": lambda x, y: x - y,
+                "*": lambda x, y: x * y,
+            }
+            return Atom(ops[expr.op](left.value, right.value))
+        except:
+            pass
+
+    # Identity and annihilator rules
+    if expr.op == "+":
+        if type(left) == Atom and left.value == 0:
+            return right
+        if type(right) == Atom and right.value == 0:
+            return left
+    elif expr.op == "*":
+        if type(left) == Atom and left.value == 1:
+            return right
+        if type(right) == Atom and right.value == 1:
+            return left
+        if (type(left) == Atom and left.value == 0) or (type(right) == Atom and right.value == 0):
+            return Atom(0)
+
+    return BinOp(left, expr.op, right)
+
+
 Fraction.__repr__ = lambda self: (
     str(self.numerator // self.denominator)
     if self.numerator % self.denominator == 0
     else f"{self.numerator}/{self.denominator}"
 )
 
-__all__ = ["Ring","Field", "Zmod", "Fraction"]
+__all__ = ["Ring", "Field", "Zmod", "Fraction", "Symbol", "basic_generic_reducer"]

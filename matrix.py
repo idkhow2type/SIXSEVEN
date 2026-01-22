@@ -103,7 +103,11 @@ class Matrix(Generic[_T_Ring]):
                     ans += ")\n"
                 return ans[:-1]
             case "latex":
-                return "\\begin{pmatrix}"+"\\\\".join('&'.join(str(i) for i in row) for row in self._data)+"\\end{pmatrix}"
+                return (
+                    "\\begin{pmatrix}"
+                    + "\\\\".join("&".join(str(i) for i in row) for row in self._data)
+                    + "\\end{pmatrix}"
+                )
 
     def __getitem__(self, pos: tuple):
         row, col = pos
@@ -178,18 +182,21 @@ class Matrix(Generic[_T_Ring]):
         return Matrix(*data, num_type=num_type)
 
     def __pow__(
-        self: "Matrix[_T_Field]", other: Literal["T", -1]
+        self: "Matrix[_T_Field]", value: Literal["T"] | int
     ) -> "Matrix[_T_Ring] | Matrix[_T_Field]":
-        match other:
-            case "T":
-                return Matrix(
-                    *(
-                        [self._data[j][i] for j in range(self.rows)]
-                        for i in range(self.cols)
-                    )
+        if value == "T":
+            return Matrix(
+                *(
+                    [self._data[j][i] for j in range(self.rows)]
+                    for i in range(self.cols)
                 )
-
-            case -1:
+            )
+        if type(value) == int:
+            if self.rows != self.cols:
+                raise ValueError
+            if value == 0:
+                return Matrix.ident(self.rows, num_type=self.num_type)
+            if value < 0:
                 if self.rows != self.cols:
                     raise ValueError
 
@@ -201,7 +208,8 @@ class Matrix(Generic[_T_Ring]):
                 )
                 for op in ops:
                     inv = op.apply(inv)
-                return inv
+                return inv ** abs(value)
+            return self @ (self ** (value - 1))
 
         return NotImplemented
 
