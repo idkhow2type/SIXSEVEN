@@ -8,7 +8,7 @@ _T_In = TypeVar("_T_In")
 _T_RingStatic = TypeVar("_T_RingStatic", bound=Ring)
 
 
-class Vector(Generic[_T_Ring]):
+class Vector(Generic[_T_Ring], Sequence):
     @overload
     def __init__(self, *data: _T_Ring, num_type: None = None) -> None: ...
     @overload
@@ -17,7 +17,7 @@ class Vector(Generic[_T_Ring]):
     def __init__(
         self, *data: Any, num_type: Callable[[_T_In], _T_Ring] | None = None
     ) -> None:
-        self._data = [(num_type(item) if num_type else item) for item in data]
+        self._data = tuple((num_type(item) if num_type else item) for item in data)
 
     def __repr__(self) -> str:
         match CONFIG["repr_type"]:
@@ -29,7 +29,7 @@ class Vector(Generic[_T_Ring]):
     def __len__(self) -> int:
         return len(self._data)
 
-    def __getitem__(self, i: int):
+    def __getitem__(self, i):
         return self._data[i]
 
     def __iter__(self):

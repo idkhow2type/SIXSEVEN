@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Generic, TypeVar, Tuple
+from typing import Generic, TypeVar
 from .number_system import Field
 from .matrix import Matrix
 
@@ -65,7 +65,7 @@ class RowSwap(RowOperation[_T_Field]):
 
 def to_rref(
     mat: Matrix[_T_Field], allow_zeroes=True
-) -> Tuple[Matrix[_T_Field], list[RowOperation[_T_Field]]]:
+) -> tuple[Matrix[_T_Field], list[RowOperation[_T_Field]]]:
     ops = []
 
     c = 0
@@ -96,7 +96,9 @@ def to_rref(
         for i0 in range(mat.rows):
             if i0 == r:
                 continue
-            op = RowAdd(i0, -mat[i0, c] / mat[r, c], r)
+            if -mat[i0, c] == 0:
+                continue
+            op = RowAdd(i0, -mat[i0, c], r)
             mat = op.apply(mat)
             ops.append(op)
 

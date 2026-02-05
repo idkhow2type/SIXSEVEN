@@ -95,6 +95,8 @@ def Zmod(base: int, start=0):
     return _Zmod
 
 
+# totally stole this from cmput274
+# me when school actually teaches things
 class Atom:
     def __init__(self, value) -> None:
         self.value = value
@@ -115,62 +117,64 @@ class BinOp:
 
 Expr = Atom | BinOp
 
-class Symbol:
-    def __init__(self, symbol: Any | Expr, reducer: Callable[[Expr], Expr]) -> None:
-        # Note: terms should always be reduced
-        self.expr: Expr = (
-            symbol if isinstance(symbol, Expr) else Atom(symbol)
-        )
-        self.reducer = reducer
 
-    def __repr__(self) -> str:
-        return str(self.expr)
+def SymGen(reducer: Callable[[Expr], Expr]):
+    class Symbol:
+        def __init__(self, symbol: Any | Expr) -> None:
+            # Note: terms should always be reduced
+            self.expr: Expr = symbol if isinstance(symbol, Expr) else Atom(symbol)
+            self.reducer = reducer
 
-    def __eq__(self, value: object) -> bool:
-        return (
-            type(value) == Symbol
-            and self.expr == value.expr
-            and self.reducer == value.reducer
-        )
+        def __repr__(self) -> str:
+            return str(self.expr)
 
-    def _compute(self, value: "Symbol | Any", op: str, swap=False):
-        if type(value) == Symbol:
-            if value.reducer != self.reducer:
-                raise ValueError
-            left = self.expr
-            right = value.expr
-        else:
-            left = self.expr
-            right = Atom(value)
+        def __eq__(self, value: object) -> bool:
+            return (
+                type(value) == Symbol
+                and self.expr == value.expr
+                and self.reducer == value.reducer
+            )
 
-        if swap:
-            left, right = right, left
+        def _compute(self, value: "Symbol | Any", op: str, swap=False):
+            if type(value) == Symbol:
+                if value.reducer != self.reducer:
+                    raise ValueError
+                left = self.expr
+                right = value.expr
+            else:
+                left = self.expr
+                right = Atom(value)
 
-        return Symbol(self.reducer(BinOp(left, op, right)), self.reducer)
+            if swap:
+                left, right = right, left
 
-    def __add__(self, value: "Symbol | Any"):
-        return self._compute(value, "+")
+            return Symbol(self.reducer(BinOp(left, op, right)))
 
-    def __radd__(self, value: "Symbol | Any"):
-        return self._compute(value, "+", swap=True)
+        def __add__(self, value: "Symbol | Any"):
+            return self._compute(value, "+")
 
-    def __sub__(self, value: "Symbol | Any"):
-        return self._compute(value, "-")
+        def __radd__(self, value: "Symbol | Any"):
+            return self._compute(value, "+", swap=True)
 
-    def __rsub__(self, value: "Symbol | Any"):
-        return self._compute(value, "-", swap=True)
+        def __sub__(self, value: "Symbol | Any"):
+            return self._compute(value, "-")
 
-    def __mul__(self, value: "Symbol | Any"):
-        return self._compute(value, "*")
+        def __rsub__(self, value: "Symbol | Any"):
+            return self._compute(value, "-", swap=True)
 
-    def __rmul__(self, value: "Symbol | Any"):
-        return self._compute(value, "*", swap=True)
+        def __mul__(self, value: "Symbol | Any"):
+            return self._compute(value, "*")
 
-    def __matmul__(self, value: "Symbol | Any"):
-        return self._compute(value, "@")
+        def __rmul__(self, value: "Symbol | Any"):
+            return self._compute(value, "*", swap=True)
 
-    def __rmatmul__(self, value: "Symbol | Any"):
-        return self._compute(value, "@", swap=True)
+        def __matmul__(self, value: "Symbol | Any"):
+            return self._compute(value, "@")
+
+        def __rmatmul__(self, value: "Symbol | Any"):
+            return self._compute(value, "@", swap=True)
+
+    return Symbol
 
 
 def basic_generic_reducer(expr: Expr) -> Expr:
@@ -179,7 +183,13 @@ def basic_generic_reducer(expr: Expr) -> Expr:
     assert type(expr) == BinOp
     left = basic_generic_reducer(expr.left)
     right = basic_generic_reducer(expr.right)
-    if type(left) == Atom and type(right) == Atom:
+    if (
+        type(left) == Atom
+        and type(right) == Atom
+        and not (type(left.value) == type(right.value) == str) # this is hacky
+    ):
+        # probably should do something more sane than using
+        # try catch to check if the operation is possible
         try:
             ops = {
                 "+": lambda x, y: x + y,
@@ -201,7 +211,9 @@ def basic_generic_reducer(expr: Expr) -> Expr:
             return right
         if type(right) == Atom and right.value == 1:
             return left
-        if (type(left) == Atom and left.value == 0) or (type(right) == Atom and right.value == 0):
+        if (type(left) == Atom and left.value == 0) or (
+            type(right) == Atom and right.value == 0
+        ):
             return Atom(0)
 
     return BinOp(left, expr.op, right)
@@ -213,4 +225,4 @@ Fraction.__repr__ = lambda self: (
     else f"{self.numerator}/{self.denominator}"
 )
 
-__all__ = ["Ring", "Field", "Zmod", "Fraction", "Symbol", "basic_generic_reducer"]
+__all__ = ["Ring", "Field", "Zmod", "Fraction", "SymGen", "basic_generic_reducer"]
