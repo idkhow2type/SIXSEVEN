@@ -17,7 +17,12 @@ class Vector(Generic[_T_Ring], Sequence):
     def __init__(
         self, *data: Any, num_type: Callable[[_T_In], _T_Ring] | None = None
     ) -> None:
-        self._data = tuple((num_type(item) if num_type else item) for item in data)
+        self.num_type = num_type or (
+            type(self[0])
+            if CONFIG["num_type"]["missing"] == "infer"
+            else cast(Callable[[Any], _T_Ring], CONFIG["num_type"]["default"])
+        )
+        self._data = tuple(self.num_type(item) for item in data)
 
     def __repr__(self) -> str:
         match CONFIG["repr_type"]:
@@ -69,23 +74,24 @@ def dot(vec_a: Vector[_T_Ring], vec_b: Vector[_T_Ring]) -> _T_Ring:
 
 
 class Matrix(Generic[_T_Ring]):
-    @overload
-    def __init__(self, *data: Sequence[_T_Ring], num_type: None = None) -> None: ...
-    @overload
-    def __init__(
-        self, *data: Sequence[_T_In], num_type: Callable[[_T_In], _T_Ring]
-    ) -> None: ...
+    # @overload
+    # def __init__(self, *data: Sequence[_T_Ring], num_type: None = None) -> None: ...
+    # @overload
+    # def __init__(
+    #     self, *data: Sequence[_T_In], num_type: Callable[[_T_In], _T_Ring]
+    # ) -> None: ...
 
     def __init__(
         self, *data: Sequence[Any], num_type: Callable[[Any], _T_Ring] | None = None
     ) -> None:
-        self._data = tuple(
-            tuple((num_type(item) if num_type else item) for item in row)
-            for row in data
+        self.num_type = num_type or (
+            type(self[0, 0])
+            if CONFIG["num_type"]["missing"] == "infer"
+            else cast(Callable[[Any], _T_Ring], CONFIG["num_type"]["default"])
         )
+        self._data = tuple(tuple(self.num_type(item) for item in row) for row in data)
         self.rows = len(data)
         self.cols = len(data[0])
-        self.num_type = num_type or type(self[0, 0])
 
     def __repr__(self):
         match CONFIG["repr_type"]:
@@ -113,7 +119,14 @@ class Matrix(Generic[_T_Ring]):
         row, col = pos
         return self._data[row][col]
 
-    def _add(self, other: "Matrix"):
+    # TODO: row and col should be generators
+    def row(self, i: int) -> Vector[_T_Ring]:
+        return Vector(*self._data[i])
+
+    def col(self, j: int) -> Vector[_T_Ring]:
+        return Vector(*(self._data[i][j] for i in range(self.rows)))
+
+    def _add(self, other: "Matrix[_T_Ring]") -> "Matrix[_T_Ring]":
         return Matrix(
             *(
                 tuple(a + b for a, b in zip(row_self, row_other))
@@ -123,56 +136,40 @@ class Matrix(Generic[_T_Ring]):
 
     __add__, __radd__ = _add, _add
 
-    def __sub__(self, other: "Matrix"):
+    @staticmethod
+    def _sub(a, b: "Matrix[_T_Ring]") -> "Matrix[_T_Ring]":
         return Matrix(
             *(
-                tuple(a - b for a, b in zip(row_self, row_other))
-                for row_self, row_other in zip(self._data, other._data)
+                tuple(a - b for a, b in zip(row_a, row_b))
+                for row_a, row_b in zip(a._data, b._data)
             ),
         )
 
-    def __rsub__(self, other: "Matrix"):
+    __sub__, __rsub__ = _sub, lambda a, b: Matrix._sub(b, a)
+
+    def _mul(self, num: _T_Ring):
         return Matrix(
-            *(
-                tuple(b - a for a, b in zip(row_self, row_other))
-                for row_self, row_other in zip(self._data, other._data)
-            ),
-        )
-
-    def row(self, i: int) -> Vector[_T_Ring]:
-        return Vector(*self._data[i])
-
-    def col(self, j: int) -> Vector[_T_Ring]:
-        return Vector(*(self._data[i][j] for i in range(self.rows)))
-
-    def _mul(self, other: _T_Ring):
-        return Matrix(
-            *([other * item for item in row] for row in self._data),
+            *([num * item for item in row] for row in self._data),
         )
 
     __mul__, __rmul__ = _mul, _mul
 
-    def __matmul__(self, other: "Matrix"):
-        if self.cols != other.rows:
+    @staticmethod
+    def _matmul(a: "Matrix[_T_Ring]", b: "Matrix[_T_Ring]") -> "Matrix[_T_Ring]":
+        # TODO: DFT mat mul just because
+        if a.cols != b.rows:
             raise ValueError
 
         return Matrix(
-            *[
-                [dot(self.row(i), other.col(j)) for j in range(other.cols)]
-                for i in range(self.rows)
-            ],
+            *[[dot(a.row(i), b.col(j)) for j in range(b.cols)] for i in range(a.rows)],
         )
 
-    def __rmatmul__(self, other: "Matrix"):
-        if other.cols != self.cols:
-            raise ValueError
+    __matmul__, __rmatmul__ = _matmul, lambda a, b: Matrix._matmul(b, a)
 
-        return Matrix(
-            *[
-                [dot(other.row(i), self.col(j)) for j in range(self.cols)]
-                for i in range(other.rows)
-            ],
-        )
+    # * small note for above
+    # i dont like how some of the private methods are static but others arent
+    # ideally all of them would be static, but the non static ones have their
+    # own benefits
 
     @staticmethod
     def ident(
@@ -194,8 +191,13 @@ class Matrix(Generic[_T_Ring]):
         if type(value) == int:
             if self.rows != self.cols:
                 raise ValueError
+
+            # TODO: something like this instead of cast
+            # assert isinstance(self.num_type, Callable[[int], _T_Field])
+            num_type = cast("Callable[[int], _T_Field]", self.num_type)
+
             if value == 0:
-                return Matrix.ident(self.rows, num_type=self.num_type)
+                return Matrix.ident(self.rows, num_type=num_type)
             if value < 0:
                 if self.rows != self.cols:
                     raise ValueError
@@ -203,9 +205,7 @@ class Matrix(Generic[_T_Ring]):
                 from .gaussian_elim import to_rref
 
                 ops = to_rref(self, allow_zeroes=False)[1]
-                inv = Matrix.ident(
-                    self.rows, cast("Callable[[int], _T_Field]", self.num_type)
-                )
+                inv = Matrix.ident(self.rows, num_type)
                 for op in ops:
                     inv = op.apply(inv)
                 return inv ** abs(value)
@@ -233,6 +233,40 @@ class Matrix(Generic[_T_Ring]):
                             -self[pivots[j], j_]
                         )
         return [Vector(*params[k]) for k in params]
+
+    def det(self: "Matrix[_T_Field]") -> _T_Field:
+        """
+        Note: Assumes ring is commutative
+        """
+        if self.rows != self.cols:
+            raise ValueError
+
+        from .mat_ops import RowSwap, RowAdd
+
+        mat = self
+        ans = self.num_type(1)
+
+        for i in range(mat.cols):
+            if mat[i, i] == 0:
+                for r in range(i,mat.rows):
+                    if mat[r, i] != 0:
+                        op = RowSwap(i, r)
+                        mat = op.apply(mat)
+                        ans *= self.num_type(-1)
+                        break
+                else:
+                    return self.num_type(0)
+
+            ans *= mat[i, i]
+
+            for r in range(i+1,mat.rows):
+                s = -mat[r, i] / mat[i, i]
+                if s == 0:
+                    continue
+                op = RowAdd(r, s, i)
+                mat = op.apply(mat)
+
+        return ans
 
 
 T = "T"

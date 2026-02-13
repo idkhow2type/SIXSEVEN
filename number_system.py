@@ -11,7 +11,6 @@ class Ring(Protocol):
     def __rmul__(self, other: Self, /) -> Self: ...
 
 
-# TODO: this obviously doesnt support ints, and floats look ugly, so make a real type wrapper
 class Field(Ring, Protocol):
     def __truediv__(self, other: Self, /) -> Self: ...
     def __rtruediv__(self, other: Self, /) -> Self: ...
@@ -186,7 +185,7 @@ def basic_generic_reducer(expr: Expr) -> Expr:
     if (
         type(left) == Atom
         and type(right) == Atom
-        and not (type(left.value) == type(right.value) == str) # this is hacky
+        and not (type(left.value) == type(right.value) == str)  # this is hacky
     ):
         # probably should do something more sane than using
         # try catch to check if the operation is possible
