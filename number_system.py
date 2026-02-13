@@ -1,6 +1,7 @@
 from fractions import Fraction
 from typing import Protocol, Self, Any, TypeVar, Generic, Callable, overload
-from abc import ABC, abstractmethod
+from abc import ABC
+from functools import partial
 
 
 # TODO: maybe make these support ints and floats
@@ -160,6 +161,11 @@ class Symbol(ABC, Generic[T]):
             return NotImplemented
         return self.num_type == value.num_type and self.expr == value.expr
 
+    @property
+    def _S(self) -> Callable[..., Self]:
+        """Constructor factory that returns instances of the concrete subclass."""
+        return partial(self.__class__, num_type=self.num_type)
+
 
 class FieldSymbol(Symbol[_T_Field]):
     def __init__(
@@ -176,44 +182,26 @@ class FieldSymbol(Symbol[_T_Field]):
     def _coerce(
         self, value: "FieldSymbol[_T_Field] | _T_Field"
     ) -> "FieldSymbol[_T_Field]":
-        return (
-            value
-            if isinstance(value, FieldSymbol)
-            else FieldSymbol(value, self.num_type)
-        )
+        return value if isinstance(value, FieldSymbol) else self._S(value)
 
-    def _is_atom(self, expr: Expr) -> bool:
-        return isinstance(expr, Atom)
+    def is_num(self):
+        return isinstance(self.expr, Atom) and not isinstance(self.expr.value, str)
 
-    def _atom_is_number(self, expr: Expr) -> bool:
-        # ensure expr is Atom before accessing .value
-        return isinstance(expr, Atom) and not isinstance(expr.value, str)
-
-    def _is_zero(self, expr: Expr) -> bool:
-        # ensure expr is Atom before accessing .value
-        return isinstance(expr, Atom) and expr.value == self.num_type(0)
-
-    def _is_one(self, expr: Expr) -> bool:
-        # ensure expr is Atom before accessing .value
-        return isinstance(expr, Atom) and expr.value == self.num_type(1)
-
-    def _both_atom_numbers(self, a: Expr, b: Expr) -> bool:
-        return self._atom_is_number(a) and self._atom_is_number(b)
-
+    # TODO: redo this
     def _combine_atom_values(self, a: Expr, b: Expr, op: str):
         # callers should only call this when a and b are numeric Atoms — enforce at runtime
         if not isinstance(a, Atom) or not isinstance(b, Atom):
             raise TypeError("_combine_atom_values expects Atom instances")
         if op == "+":
-            return FieldSymbol(a.value + b.value, self.num_type)
+            return self._S(a.value + b.value)
         if op == "-":
-            return FieldSymbol(a.value - b.value, self.num_type)
+            return self._S(a.value - b.value)
         if op == "*":
-            return FieldSymbol(a.value * b.value, self.num_type)
+            return self._S(a.value * b.value)
         if op == "/":
-            return FieldSymbol(a.value / b.value, self.num_type)
+            return self._S(a.value / b.value)
         if op == "**":
-            return FieldSymbol(a.value**b.value, self.num_type)
+            return self._S(a.value**b.value)
         raise ValueError("unsupported op")
 
     def order(self):
@@ -241,11 +229,11 @@ class FieldSymbol(Symbol[_T_Field]):
         left, right = sorted((self, value), key=lambda x: x.order())
 
         # additive identities
-        if self._is_zero(left.expr):
+        if left == self._S(0):
             return right
 
         # combine numeric atoms
-        if self._both_atom_numbers(left.expr, right.expr):
+        if left.is_num() and right.is_num():
             return self._combine_atom_values(left.expr, right.expr, "+")
 
         """
@@ -256,11 +244,18 @@ class FieldSymbol(Symbol[_T_Field]):
 
         # associativity
         if isinstance(right.expr, BinOp) and right.expr.op == "+":
-            return (
-                left + FieldSymbol(right.expr.left, num_type=self.num_type)
-            ) + FieldSymbol(right.expr.right, num_type=self.num_type)
+            return (left + self._S(right.expr.left)) + self._S(right.expr.right)
+        
+        # inverse
+        if (
+            isinstance(right.expr, BinOp)
+            and right.expr.op == "*"
+            and right.expr.left == Atom(self.num_type(-1))
+            and left.expr == right.expr.right
+        ):
+            return self._S(0)
 
-        return FieldSymbol(BinOp(left.expr, "+", right.expr), self.num_type)
+        return self._S(BinOp(left.expr, "+", right.expr))
 
     __add__, __radd__ = _add, _add
 
@@ -290,22 +285,20 @@ class FieldSymbol(Symbol[_T_Field]):
         left, right = sorted((self, value), key=lambda x: x.order())
 
         # zero
-        if self._is_zero(left.expr):
-            return FieldSymbol(0, self.num_type)
+        if left == self._S(0):
+            return self._S(0)
 
         # one
-        if self._is_one(left.expr):
+        if left == self._S(1):
             return right
 
         # combine numeric atoms
-        if self._both_atom_numbers(left.expr, right.expr):
+        if left.is_num() and right.is_num():
             return self._combine_atom_values(left.expr, right.expr, "*")
 
         # associativity
         if isinstance(right.expr, BinOp) and right.expr.op == "*":
-            return (
-                left + FieldSymbol(right.expr.left, num_type=self.num_type)
-            ) + FieldSymbol(right.expr.right, num_type=self.num_type)
+            return (left + self._S(right.expr.left)) + self._S(right.expr.right)
 
         # inverse
         if (
@@ -314,11 +307,11 @@ class FieldSymbol(Symbol[_T_Field]):
             and right.expr.right == Atom(self.num_type(-1))
             and left.expr == right.expr.left
         ):
-            return FieldSymbol(1, self.num_type)
+            return self._S(1)
 
         # TODO: distributivity
 
-        return FieldSymbol(BinOp(left.expr, "*", right.expr), self.num_type)
+        return self._S(BinOp(left.expr, "*", right.expr))
 
     __mul__, __rmul__ = _mul, _mul
 
@@ -329,10 +322,10 @@ class FieldSymbol(Symbol[_T_Field]):
         value = self._coerce(value)
 
         # division by zero
-        if self._is_zero(value.expr):
+        if value == self._S(0):
             raise ZeroDivisionError
 
-        return self * FieldSymbol(value ** self.num_type(-1), num_type=self.num_type)
+        return self * self._S(value ** self.num_type(-1))
 
     def __rtruediv__(self, value: "FieldSymbol[_T_Field]" | _T_Field):
         if not self._is_compatible(value):
@@ -341,10 +334,10 @@ class FieldSymbol(Symbol[_T_Field]):
         value = self._coerce(value)
 
         # division by zero
-        if self._is_zero(self.expr):
+        if self == self._S(0):
             raise ZeroDivisionError
 
-        return value * FieldSymbol(self ** self.num_type(-1), num_type=self.num_type)
+        return value * self._S(self ** self.num_type(-1))
 
     def __neg__(self):
         return self.num_type(-1) * self
@@ -355,13 +348,13 @@ class FieldSymbol(Symbol[_T_Field]):
 
         value = self._coerce(value)
 
-        if self._is_one(self.expr):
-            return FieldSymbol(1, self.num_type)
+        if self == self._S(0):
+            return self._S(1)
 
-        if self._both_atom_numbers(self.expr, value.expr):
+        if self.is_num() and value.is_num():
             return self._combine_atom_values(self.expr, value.expr, "**")
 
-        return FieldSymbol(BinOp(self.expr, "**", value.expr), self.num_type)
+        return self._S(BinOp(self.expr, "**", value.expr))
 
     def __rpow__(self, value: "FieldSymbol[_T_Field]" | _T_Field):
         if not self._is_compatible(value):
@@ -369,13 +362,13 @@ class FieldSymbol(Symbol[_T_Field]):
 
         value = self._coerce(value)
 
-        if self._is_one(value.expr):
-            return FieldSymbol(1, self.num_type)
+        if value == self._S(1):
+            return self._S(1)
 
-        if self._both_atom_numbers(self.expr, value.expr):
+        if self.is_num() and value.is_num():
             return self._combine_atom_values(value.expr, self.expr, "**")
 
-        return FieldSymbol(BinOp(value.expr, "**", self.expr), self.num_type)
+        return self._S(BinOp(value.expr, "**", self.expr))
 
 
 # so apparently there's this thing called sympy
