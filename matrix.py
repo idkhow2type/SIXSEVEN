@@ -9,16 +9,11 @@ _T_RingStatic = TypeVar("_T_RingStatic", bound=Ring)
 
 
 class Vector(Generic[_T_Ring], Sequence):
-    @overload
-    def __init__(self, *data: _T_Ring, num_type: None = None) -> None: ...
-    @overload
-    def __init__(self, *data: _T_In, num_type: Callable[[_T_In], _T_Ring]) -> None: ...
-
     def __init__(
         self, *data: Any, num_type: Callable[[_T_In], _T_Ring] | None = None
     ) -> None:
         self.num_type = num_type or (
-            type(self[0])
+            type(data[0])
             if CONFIG["num_type"]["missing"] == "infer"
             else cast(Callable[[Any], _T_Ring], CONFIG["num_type"]["default"])
         )
@@ -43,22 +38,22 @@ class Vector(Generic[_T_Ring], Sequence):
     def _add(self, other: "Vector[_T_Ring]") -> "Vector[_T_Ring]":
         if len(self) != len(other):
             raise ValueError
-        return Vector(*(a + b for a, b in zip(self, other)))
+        return Vector(*(a + b for a, b in zip(self, other)), num_type=self.num_type)
 
     __add__, __radd__ = _add, _add
 
     def __sub__(self, other: "Vector[_T_Ring]") -> "Vector[_T_Ring]":
         if len(self) != len(other):
             raise ValueError
-        return Vector(*(a - b for a, b in zip(self, other)))
+        return Vector(*(a - b for a, b in zip(self, other)), num_type=self.num_type)
 
     def __rsub__(self, other: "Vector[_T_Ring]") -> "Vector[_T_Ring]":
         if len(self) != len(other):
             raise ValueError
-        return Vector(*(b - a for a, b in zip(self, other)))
+        return Vector(*(b - a for a, b in zip(self, other)), num_type=self.num_type)
 
     def _mul(self, other: _T_Ring) -> "Vector[_T_Ring]":
-        return Vector(*(item * other for item in self._data))
+        return Vector(*(item * other for item in self._data), num_type=self.num_type)
 
     __mul__, __rmul__ = _mul, _mul
 
@@ -85,7 +80,7 @@ class Matrix(Generic[_T_Ring]):
         self, *data: Sequence[Any], num_type: Callable[[Any], _T_Ring] | None = None
     ) -> None:
         self.num_type = num_type or (
-            type(self[0, 0])
+            type(data[0][0])
             if CONFIG["num_type"]["missing"] == "infer"
             else cast(Callable[[Any], _T_Ring], CONFIG["num_type"]["default"])
         )
@@ -121,10 +116,10 @@ class Matrix(Generic[_T_Ring]):
 
     # TODO: row and col should be generators
     def row(self, i: int) -> Vector[_T_Ring]:
-        return Vector(*self._data[i])
+        return Vector(*self._data[i],num_type=self.num_type)
 
     def col(self, j: int) -> Vector[_T_Ring]:
-        return Vector(*(self._data[i][j] for i in range(self.rows)))
+        return Vector(*(self._data[i][j] for i in range(self.rows)),num_type=self.num_type)
 
     def _add(self, other: "Matrix[_T_Ring]") -> "Matrix[_T_Ring]":
         return Matrix(
@@ -188,7 +183,7 @@ class Matrix(Generic[_T_Ring]):
                     for i in range(self.cols)
                 )
             )
-        if type(value) == int:
+        if isinstance(value, int):
             if self.rows != self.cols:
                 raise ValueError
 
@@ -248,7 +243,7 @@ class Matrix(Generic[_T_Ring]):
 
         for i in range(mat.cols):
             if mat[i, i] == 0:
-                for r in range(i,mat.rows):
+                for r in range(i, mat.rows):
                     if mat[r, i] != 0:
                         op = RowSwap(i, r)
                         mat = op.apply(mat)
@@ -259,7 +254,7 @@ class Matrix(Generic[_T_Ring]):
 
             ans *= mat[i, i]
 
-            for r in range(i+1,mat.rows):
+            for r in range(i + 1, mat.rows):
                 s = -mat[r, i] / mat[i, i]
                 if s == 0:
                     continue
@@ -271,4 +266,4 @@ class Matrix(Generic[_T_Ring]):
 
 T = "T"
 
-__all__ = ["Vector", "Matrix", "T"]
+__all__ = ["Vector", "Matrix", "T", "dot"]

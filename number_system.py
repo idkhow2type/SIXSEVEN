@@ -146,7 +146,6 @@ class Symbol(ABC, Generic[T]):
             assert symbol.num_type == self.num_type
             self.expr = symbol.expr
         else:
-            print(symbol, type(symbol))
             self.expr: Expr = (
                 symbol
                 if isinstance(symbol, Expr)
@@ -169,6 +168,11 @@ class FieldSymbol(Symbol[_T_Field]):
         super().__init__(symbol, num_type)
 
     # --- small helpers to remove repetition ---
+    def _is_compatible(self, value: object):
+        return (
+            isinstance(value, FieldSymbol) and self.num_type == value.num_type
+        ) or type(value) == self.num_type
+
     def _coerce(
         self, value: "FieldSymbol[_T_Field] | _T_Field"
     ) -> "FieldSymbol[_T_Field]":
@@ -210,8 +214,25 @@ class FieldSymbol(Symbol[_T_Field]):
             return FieldSymbol(a.value / b.value, self.num_type)
         raise ValueError("unsupported op")
 
+    def order(self):
+        """
+        order from least to most
+        number atom
+        string atom
+        expr
+        """
+        if isinstance(self.expr, Atom):
+            # actually fields aren't neccessarilly well ordered,
+            # so this doesn't compare number atoms to each other
+            # this is fine as they'll be combined already
+            return (int(isinstance(self.expr.value, str)), self.expr.value)
+        return (2, -1)
+
     # --- arithmetic operations ---
     def _add(self, value: "FieldSymbol[_T_Field]" | _T_Field):
+        if not self._is_compatible(value):
+            return NotImplemented
+
         value = self._coerce(value)
 
         # additive identities
@@ -220,51 +241,50 @@ class FieldSymbol(Symbol[_T_Field]):
         if self._is_zero(value.expr):
             return self
 
-        # TODO: commutativity, associativity
-
         # combine numeric atoms
         if self._both_atom_numbers(self.expr, value.expr):
             return self._combine_atom_values(self.expr, value.expr, "+")
 
-        return FieldSymbol(BinOp(self.expr, "+", value.expr), self.num_type)
+
+        # commutativity
+        left, right = sorted((self, value), key=lambda x: x.order())
+
+        """
+        right is number atom then left is number atom => combined already => impossible
+        right is string atom then left is string atom or number atom
+        right is expr then left is atom or expr
+        """
+
+        # associativity
+        if isinstance(right.expr, BinOp) and right.expr.op == "+":
+            return (
+                left + FieldSymbol(right.expr.left, num_type=self.num_type)
+            ) + FieldSymbol(right.expr.right, num_type=self.num_type)
+
+        return FieldSymbol(BinOp(left.expr, "+", right.expr), self.num_type)
 
     __add__, __radd__ = _add, _add
 
-    # TODO: maybe merge sub and rsub
     def __sub__(self, value: "FieldSymbol[_T_Field]" | _T_Field):
+        if not self._is_compatible(value):
+            return NotImplemented
+
         value = self._coerce(value)
 
-        # x - 0 -> x
-        if self._is_zero(value.expr):
-            return self
-
-        # x - x -> 0
-        if self.expr == value.expr:
-            return FieldSymbol(self.num_type(0), self.num_type)
-
-        # combine numeric atoms
-        if self._both_atom_numbers(self.expr, value.expr):
-            return self._combine_atom_values(self.expr, value.expr, "-")
-
-        return FieldSymbol(BinOp(self.expr, "-", value.expr), self.num_type)
+        return self + self.num_type(-1) * value
 
     def __rsub__(self, value: "FieldSymbol[_T_Field]" | _T_Field):
+        if not self._is_compatible(value):
+            return NotImplemented
+
         value = self._coerce(value)
 
-        # 0 - x -> -x  (handled by BinOp representation)
-        if self._is_zero(self.expr):
-            return value
-
-        # x - x -> 0
-        if self.expr == value.expr:
-            return FieldSymbol(self.num_type(0), self.num_type)
-
-        if self._both_atom_numbers(self.expr, value.expr):
-            return self._combine_atom_values(value.expr, self.expr, "-")
-
-        return FieldSymbol(BinOp(value.expr, "-", self.expr), self.num_type)
+        return value + self.num_type(-1) * self
 
     def _mul(self, value: "FieldSymbol[_T_Field]" | _T_Field):
+        if not self._is_compatible(value):
+            return NotImplemented
+
         value = self._coerce(value)
 
         # zero
@@ -277,17 +297,28 @@ class FieldSymbol(Symbol[_T_Field]):
         if self._is_one(value.expr):
             return self
 
-        # TODO: commutativity, associativity, distributivity
 
         # combine numeric atoms
         if self._both_atom_numbers(self.expr, value.expr):
             return self._combine_atom_values(self.expr, value.expr, "*")
+        
+        # commutativity
+        left, right = sorted((self, value), key=lambda x: x.order())
 
-        return FieldSymbol(BinOp(self.expr, "*", value.expr), self.num_type)
+        # associativity
+        if isinstance(right.expr, BinOp) and right.expr.op == "*":
+            return (
+                left + FieldSymbol(right.expr.left, num_type=self.num_type)
+            ) + FieldSymbol(right.expr.right, num_type=self.num_type)
+
+        return FieldSymbol(BinOp(left.expr, "*", right.expr), self.num_type)
 
     __mul__, __rmul__ = _mul, _mul
 
     def __truediv__(self, value: "FieldSymbol[_T_Field]" | _T_Field):
+        if not self._is_compatible(value):
+            return NotImplemented
+
         value = self._coerce(value)
 
         # division by zero
@@ -313,6 +344,9 @@ class FieldSymbol(Symbol[_T_Field]):
         return FieldSymbol(BinOp(self.expr, "/", value.expr), self.num_type)
 
     def __rtruediv__(self, value: "FieldSymbol[_T_Field]" | _T_Field):
+        if not self._is_compatible(value):
+            return NotImplemented
+
         value = self._coerce(value)
 
         # division by zero
@@ -336,6 +370,16 @@ class FieldSymbol(Symbol[_T_Field]):
             return self._combine_atom_values(value.expr, self.expr, "/")
 
         return FieldSymbol(BinOp(value.expr, "/", self.expr), self.num_type)
+
+    def __neg__(self):
+        return self.num_type(-1) * self
+
+
+# so apparently there's this thing called sympy
+# and it does this but good
+# so we're basically reinventing the wheel
+# not that we weren't already
+# but this is way out of hand for the original scope
 
 
 Fraction.__repr__ = lambda self: (

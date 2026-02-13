@@ -27,7 +27,7 @@ class RowAdd(RowOperation[_T_Field]):
         # TODO: respect private _data, use official row() getter
         data = [list(row) for row in mat._data]
         data[self.dest] = list(mat.row(self.dest) + self.scale * mat.row(self.src))
-        return Matrix(*data)
+        return Matrix(*data,num_type=mat.num_type)
 
     def __repr__(self) -> str:
         return f"R{self.dest} -> R{self.dest} + {self.scale}*R{self.src}"
