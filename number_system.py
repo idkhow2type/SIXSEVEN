@@ -1,7 +1,9 @@
 from fractions import Fraction
-from typing import Protocol, Self, Callable, Any
+from typing import Protocol, Self, Any, TypeVar, Generic, Callable, overload
+from abc import ABC, abstractmethod
 
 
+# TODO: maybe make these support ints and floats
 class Ring(Protocol):
     def __add__(self, other: Self, /) -> Self: ...
     def __radd__(self, other: Self, /) -> Self: ...
@@ -103,6 +105,11 @@ class Atom:
     def __repr__(self) -> str:
         return str(self.value)
 
+    def __eq__(self, value: object) -> bool:
+        if not isinstance(value, Atom):
+            return NotImplemented
+        return self.value == value.value
+
 
 class BinOp:
     def __init__(self, left: "Expr", op: str, right: "Expr") -> None:
@@ -113,109 +120,222 @@ class BinOp:
     def __repr__(self) -> str:
         return f"({str(self.left) + self.op + str(self.right)})"
 
+    def __eq__(self, value: object) -> bool:
+        if not isinstance(value, BinOp):
+            return NotImplemented
+        return (
+            self.op == value.op
+            and self.left == value.left
+            and self.right == value.right
+        )
+
 
 Expr = Atom | BinOp
 
+T = TypeVar("T")
+_T_Field = TypeVar("_T_Field", bound=Field)
 
-def SymGen(reducer: Callable[[Expr], Expr]):
-    class Symbol:
-        def __init__(self, symbol: Any | Expr) -> None:
-            # Note: terms should always be reduced
-            self.expr: Expr = symbol if isinstance(symbol, Expr) else Atom(symbol)
-            self.reducer = reducer
 
-        def __repr__(self) -> str:
-            return str(self.expr)
-
-        def __eq__(self, value: object) -> bool:
-            return (
-                type(value) == Symbol
-                and self.expr == value.expr
-                and self.reducer == value.reducer
+class Symbol(ABC, Generic[T]):
+    def __init__(
+        self, symbol: "Any | Expr | Symbol", num_type: Callable[[Any], T]
+    ) -> None:
+        # Note: terms should always be reduced
+        self.num_type = num_type
+        if isinstance(symbol, Symbol):
+            assert symbol.num_type == self.num_type
+            self.expr = symbol.expr
+        else:
+            print(symbol, type(symbol))
+            self.expr: Expr = (
+                symbol
+                if isinstance(symbol, Expr)
+                else Atom(symbol if isinstance(symbol, str) else self.num_type(symbol))
             )
 
-        def _compute(self, value: "Symbol | Any", op: str, swap=False):
-            if type(value) == Symbol:
-                if value.reducer != self.reducer:
-                    raise ValueError
-                left = self.expr
-                right = value.expr
-            else:
-                left = self.expr
-                right = Atom(value)
+    def __repr__(self) -> str:
+        return str(self.expr)
 
-            if swap:
-                left, right = right, left
-
-            return Symbol(self.reducer(BinOp(left, op, right)))
-
-        def __add__(self, value: "Symbol | Any"):
-            return self._compute(value, "+")
-
-        def __radd__(self, value: "Symbol | Any"):
-            return self._compute(value, "+", swap=True)
-
-        def __sub__(self, value: "Symbol | Any"):
-            return self._compute(value, "-")
-
-        def __rsub__(self, value: "Symbol | Any"):
-            return self._compute(value, "-", swap=True)
-
-        def __mul__(self, value: "Symbol | Any"):
-            return self._compute(value, "*")
-
-        def __rmul__(self, value: "Symbol | Any"):
-            return self._compute(value, "*", swap=True)
-
-        def __matmul__(self, value: "Symbol | Any"):
-            return self._compute(value, "@")
-
-        def __rmatmul__(self, value: "Symbol | Any"):
-            return self._compute(value, "@", swap=True)
-
-    return Symbol
+    def __eq__(self, value: object) -> bool:
+        if not isinstance(value, Symbol):
+            return NotImplemented
+        return self.num_type == value.num_type and self.expr == value.expr
 
 
-def basic_generic_reducer(expr: Expr) -> Expr:
-    if type(expr) == Atom:
-        return expr
-    assert type(expr) == BinOp
-    left = basic_generic_reducer(expr.left)
-    right = basic_generic_reducer(expr.right)
-    if (
-        type(left) == Atom
-        and type(right) == Atom
-        and not (type(left.value) == type(right.value) == str)  # this is hacky
-    ):
-        # probably should do something more sane than using
-        # try catch to check if the operation is possible
-        try:
-            ops = {
-                "+": lambda x, y: x + y,
-                "-": lambda x, y: x - y,
-                "*": lambda x, y: x * y,
-            }
-            return Atom(ops[expr.op](left.value, right.value))
-        except:
-            pass
+class FieldSymbol(Symbol[_T_Field]):
+    def __init__(
+        self, symbol: "Any | Expr | FieldSymbol", num_type: Callable[[Any], _T_Field]
+    ) -> None:
+        super().__init__(symbol, num_type)
 
-    # Identity and annihilator rules
-    if expr.op == "+":
-        if type(left) == Atom and left.value == 0:
-            return right
-        if type(right) == Atom and right.value == 0:
-            return left
-    elif expr.op == "*":
-        if type(left) == Atom and left.value == 1:
-            return right
-        if type(right) == Atom and right.value == 1:
-            return left
-        if (type(left) == Atom and left.value == 0) or (
-            type(right) == Atom and right.value == 0
-        ):
-            return Atom(0)
+    # --- small helpers to remove repetition ---
+    def _coerce(
+        self, value: "FieldSymbol[_T_Field] | _T_Field"
+    ) -> "FieldSymbol[_T_Field]":
+        return (
+            value
+            if isinstance(value, FieldSymbol)
+            else FieldSymbol(value, self.num_type)
+        )
 
-    return BinOp(left, expr.op, right)
+    def _is_atom(self, expr: Expr) -> bool:
+        return isinstance(expr, Atom)
+
+    def _atom_is_number(self, expr: Expr) -> bool:
+        # ensure expr is Atom before accessing .value
+        return isinstance(expr, Atom) and not isinstance(expr.value, str)
+
+    def _is_zero(self, expr: Expr) -> bool:
+        # ensure expr is Atom before accessing .value
+        return isinstance(expr, Atom) and expr.value == self.num_type(0)
+
+    def _is_one(self, expr: Expr) -> bool:
+        # ensure expr is Atom before accessing .value
+        return isinstance(expr, Atom) and expr.value == self.num_type(1)
+
+    def _both_atom_numbers(self, a: Expr, b: Expr) -> bool:
+        return self._atom_is_number(a) and self._atom_is_number(b)
+
+    def _combine_atom_values(self, a: Expr, b: Expr, op: str):
+        # callers should only call this when a and b are numeric Atoms — enforce at runtime
+        if not isinstance(a, Atom) or not isinstance(b, Atom):
+            raise TypeError("_combine_atom_values expects Atom instances")
+        if op == "+":
+            return FieldSymbol(a.value + b.value, self.num_type)
+        if op == "-":
+            return FieldSymbol(a.value - b.value, self.num_type)
+        if op == "*":
+            return FieldSymbol(a.value * b.value, self.num_type)
+        if op == "/":
+            return FieldSymbol(a.value / b.value, self.num_type)
+        raise ValueError("unsupported op")
+
+    # --- arithmetic operations ---
+    def _add(self, value: "FieldSymbol[_T_Field]" | _T_Field):
+        value = self._coerce(value)
+
+        # additive identities
+        if self._is_zero(self.expr):
+            return value
+        if self._is_zero(value.expr):
+            return self
+
+        # TODO: commutativity, associativity
+
+        # combine numeric atoms
+        if self._both_atom_numbers(self.expr, value.expr):
+            return self._combine_atom_values(self.expr, value.expr, "+")
+
+        return FieldSymbol(BinOp(self.expr, "+", value.expr), self.num_type)
+
+    __add__, __radd__ = _add, _add
+
+    # TODO: maybe merge sub and rsub
+    def __sub__(self, value: "FieldSymbol[_T_Field]" | _T_Field):
+        value = self._coerce(value)
+
+        # x - 0 -> x
+        if self._is_zero(value.expr):
+            return self
+
+        # x - x -> 0
+        if self.expr == value.expr:
+            return FieldSymbol(self.num_type(0), self.num_type)
+
+        # combine numeric atoms
+        if self._both_atom_numbers(self.expr, value.expr):
+            return self._combine_atom_values(self.expr, value.expr, "-")
+
+        return FieldSymbol(BinOp(self.expr, "-", value.expr), self.num_type)
+
+    def __rsub__(self, value: "FieldSymbol[_T_Field]" | _T_Field):
+        value = self._coerce(value)
+
+        # 0 - x -> -x  (handled by BinOp representation)
+        if self._is_zero(self.expr):
+            return value
+
+        # x - x -> 0
+        if self.expr == value.expr:
+            return FieldSymbol(self.num_type(0), self.num_type)
+
+        if self._both_atom_numbers(self.expr, value.expr):
+            return self._combine_atom_values(value.expr, self.expr, "-")
+
+        return FieldSymbol(BinOp(value.expr, "-", self.expr), self.num_type)
+
+    def _mul(self, value: "FieldSymbol[_T_Field]" | _T_Field):
+        value = self._coerce(value)
+
+        # zero
+        if self._is_zero(self.expr) or self._is_zero(value.expr):
+            return FieldSymbol(self.num_type(0), self.num_type)
+
+        # one
+        if self._is_one(self.expr):
+            return value
+        if self._is_one(value.expr):
+            return self
+
+        # TODO: commutativity, associativity, distributivity
+
+        # combine numeric atoms
+        if self._both_atom_numbers(self.expr, value.expr):
+            return self._combine_atom_values(self.expr, value.expr, "*")
+
+        return FieldSymbol(BinOp(self.expr, "*", value.expr), self.num_type)
+
+    __mul__, __rmul__ = _mul, _mul
+
+    def __truediv__(self, value: "FieldSymbol[_T_Field]" | _T_Field):
+        value = self._coerce(value)
+
+        # division by zero
+        if self._is_zero(value.expr):
+            raise ZeroDivisionError
+
+        # x / 1 -> x
+        if self._is_one(value.expr):
+            return self
+
+        # 0 / x -> 0
+        if self._is_zero(self.expr):
+            return FieldSymbol(self.num_type(0), self.num_type)
+
+        # x / x -> 1
+        if self.expr == value.expr:
+            return FieldSymbol(self.num_type(1), self.num_type)
+
+        # combine numeric atoms
+        if self._both_atom_numbers(self.expr, value.expr):
+            return self._combine_atom_values(self.expr, value.expr, "/")
+
+        return FieldSymbol(BinOp(self.expr, "/", value.expr), self.num_type)
+
+    def __rtruediv__(self, value: "FieldSymbol[_T_Field]" | _T_Field):
+        value = self._coerce(value)
+
+        # division by zero
+        if self._is_zero(self.expr):
+            raise ValueError
+
+        # 1 / x -> x when x == 1 handled below
+        if self._is_one(self.expr):
+            return value
+
+        # 0 / x -> 0
+        if self._is_zero(value.expr):
+            return FieldSymbol(self.num_type(0), self.num_type)
+
+        # x / x -> 1
+        if self.expr == value.expr:
+            return FieldSymbol(self.num_type(1), self.num_type)
+
+        # combine numeric atoms
+        if self._both_atom_numbers(self.expr, value.expr):
+            return self._combine_atom_values(value.expr, self.expr, "/")
+
+        return FieldSymbol(BinOp(value.expr, "/", self.expr), self.num_type)
 
 
 Fraction.__repr__ = lambda self: (
@@ -224,4 +344,4 @@ Fraction.__repr__ = lambda self: (
     else f"{self.numerator}/{self.denominator}"
 )
 
-__all__ = ["Ring", "Field", "Zmod", "Fraction", "SymGen", "basic_generic_reducer"]
+__all__ = ["Ring", "Field", "Zmod", "Fraction", "FieldSymbol"]
