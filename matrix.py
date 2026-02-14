@@ -242,9 +242,9 @@ class Matrix(Generic[_T_Ring]):
         ans = self.num_type(1)
 
         for i in range(mat.cols):
-            if mat[i, i] == 0:
+            if mat[i, i] == self.num_type(0):
                 for r in range(i, mat.rows):
-                    if mat[r, i] != 0:
+                    if mat[r, i] != self.num_type(0):
                         op = RowSwap(i, r)
                         mat = op.apply(mat)
                         ans *= self.num_type(-1)
@@ -256,7 +256,7 @@ class Matrix(Generic[_T_Ring]):
 
             for r in range(i + 1, mat.rows):
                 s = -mat[r, i] / mat[i, i]
-                if s == 0:
+                if s == self.num_type(0):
                     continue
                 op = RowAdd(r, s, i)
                 mat = op.apply(mat)

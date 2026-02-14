@@ -178,7 +178,8 @@ from lib import Vector, Matrix, dot, to_rref, RowAdd, RowMul, RowSwap, Zmod, Fra
 #         result = leibniz_term(perm, m)
 #         self.assertEqual(result, 1 * 4 - 2 * 3)  # det = ad - bc
 
-
+def S(n):
+    return FieldSymbol(n,Fraction)
 class TestFieldSymbol(unittest.TestCase):
     def test_numeric_atom_combination_and_coercion(self):
         a = FieldSymbol(1, Fraction)
@@ -232,7 +233,7 @@ class TestFieldSymbol(unittest.TestCase):
 
         # incompatible num_types should not be operable
         with self.assertRaises(TypeError):
-            _ = FieldSymbol(1, Fraction) + FieldSymbol(1, float)
+            _ = FieldSymbol(1, Fraction) + FieldSymbol(1, float) # type: ignore
 
 
     def test_instance__S_factory_and_coercion(self):
@@ -248,6 +249,62 @@ class TestFieldSymbol(unittest.TestCase):
         self.assertIsInstance(res, FieldSymbol)
         # numeric atom should be a Fraction(1)
         self.assertEqual(str(res), "(1+x)")
+
+    def test_long_numeric_sum(self):
+        S0 = FieldSymbol(0, Fraction)
+        expr = sum((FieldSymbol(1, Fraction) for _ in range(200)), S0)
+        self.assertEqual(expr, FieldSymbol(200, Fraction))
+
+    def test_long_alternating_cancellation(self):
+        S0 = FieldSymbol(0, Fraction)
+        x = FieldSymbol("x", Fraction)
+        terms = []
+        for _ in range(75):
+            terms.append(FieldSymbol(1, Fraction))
+            terms.append(FieldSymbol(-1, Fraction))
+            terms.append(x)
+            terms.append(FieldSymbol(-1, Fraction) * x)
+        expr = sum(terms, S0)
+        self.assertEqual(expr, FieldSymbol(0, Fraction))
+
+    def test_repeated_multiplicative_inverse_chain(self):
+        one = FieldSymbol(1, Fraction)
+        x = FieldSymbol("x", Fraction)
+        expr = one
+        for _ in range(300):
+            expr = expr * x * (x ** FieldSymbol(-1, Fraction))
+        self.assertEqual(expr, one)
+
+    def test_deeply_nested_numeric_addition_flattening(self):
+        acc = FieldSymbol(0, Fraction)
+        for i in range(1, 51):
+            acc = acc + (FieldSymbol(i, Fraction) + (FieldSymbol(0, Fraction) + FieldSymbol(0, Fraction)))
+        self.assertEqual(acc, FieldSymbol(sum(range(1, 51)), Fraction))
+
+    def test_deeply_nested_numeric_multiplication(self):
+        prod = FieldSymbol(1, Fraction)
+        for i in range(1, 11):
+            prod = prod * (FieldSymbol(i, Fraction) * FieldSymbol(1, Fraction))
+        expected = 1
+        for i in range(1, 11):
+            expected *= i
+        self.assertEqual(prod, FieldSymbol(expected, Fraction))
+
+    def test_pow_chain_numeric(self):
+        self.assertEqual(FieldSymbol(2, Fraction) ** FieldSymbol(3, Fraction), FieldSymbol(8, Fraction))
+        self.assertEqual((FieldSymbol(2, Fraction) ** FieldSymbol(3, Fraction)) ** FieldSymbol(2, Fraction), FieldSymbol(64, Fraction))
+
+    def test_add_assoc_combines_numbers_across_nested(self):
+        expr = FieldSymbol(2, Fraction) + (FieldSymbol(1, Fraction) + (FieldSymbol(3, Fraction) + FieldSymbol(4, Fraction)))
+        self.assertEqual(expr, FieldSymbol(10, Fraction))
+
+    def test_mul_assoc_combines_numbers_across_nested(self):
+        expr = FieldSymbol(2, Fraction) * (FieldSymbol(3, Fraction) * FieldSymbol(5, Fraction))
+        self.assertEqual(expr, FieldSymbol(30, Fraction))
+
+    def test_idk(self):
+        s=(-S('B')/S('A'))
+        self.assertEqual(S('A')*s,-S('B'))
 
 
 if __name__ == '__main__':

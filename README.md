@@ -1,0 +1,15 @@
+## TODOS:
+- [ ] Abstract vector class which R^n derives from. This probably affects how ero works (which means what im bout to write is instantly deprecated)
+    - [ ] Find basis of span
+- [ ] `matrix.rank()`
+- [x] Symbol number type
+- [ ] Matrix needs to properly support commutative rings
+    - [ ] Matrix methods use `self.num_type(0)` and `self.num_type(1)`, which won't work for complex commutative rings, need to redo ring definition or make a new commutative ring definition
+    - [ ] `det` and inverse uses division, replace with the fancy algorithm
+- [ ] ~~Change `Callable[[Any],T]` to `type[T]`~~ This seems too complicated, the other way gets the idea across
+- [x] Unary `-`
+- [ ] Replace `__init__` with `__new__` (maybe but probably not)
+- [ ] Implement equal for Matrix and Vector
+- [ ] Symbol support for ops with `int` and `float`
+- [ ] Refactor `Zmod` to bind pattern
+- [ ] Implement default `num_type` for `FieldSymbol` or rework that system entirely
