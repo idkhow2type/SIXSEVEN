@@ -1,4 +1,4 @@
-from typing import TypeVar, Generic, Sequence, overload, Callable, Any, cast, Literal
+from typing import TypeVar, Generic, Sequence, Callable, Any, cast, Literal
 from .number_system import *
 from .config import CONFIG
 

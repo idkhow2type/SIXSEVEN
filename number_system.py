@@ -99,9 +99,6 @@ def Zmod(base: int, start=0):
 
 
 class Expr:
-    def __init__(self) -> None:
-        pass
-
     @staticmethod
     def is_atom(expr: "Expr") -> TypeGuard["Atom"]:
         return isinstance(expr, Atom)
@@ -122,7 +119,11 @@ class Expr:
     def is_multiop(expr: "Expr", op=None) -> TypeGuard["MultiOp"]:
         return isinstance(expr, MultiOp) and (op == None or expr.op == op)
 
-    def order(self):
+    # We will not talk about this, it is disgusting and should stay closed
+    # for the rest of time, to maintain the safety and prosperity of humanity
+    # it is not DRY, soaking wet even, it doesn't even do it's job perfectly
+    # but it's well enough
+    def binorder(self):
         """
         order is a tuple of
         (deg, op, content)
@@ -156,16 +157,43 @@ class Expr:
                 op = 1
             elif expr.op == "*":
                 op = 0
-            # this is kinda too much nesting but at least no extending tuple
-            content = (0, tuple(term.order() for term in expr.terms))
+            content = (0, tuple(term.binorder() for term in expr.terms))
         elif Expr.is_var(expr):
             op = 2
-            content = (1, expr.value)
-        elif Expr.is_num(expr) or Expr.is_var(expr):
+            content = (1, (expr.value,))
+        elif Expr.is_num(expr):
             op = 2
-            content = (2, expr.value)
+            content = (2, (expr.value,))
 
-        return (deg, op, content)
+        return (deg, content, op)
+
+    def multiorder(self):
+        expr = self
+
+        deg = (1, 1)
+        if Expr.is_binop(expr) and expr.op == "**":
+            if Expr.is_num(expr.right):
+                deg = (1, expr.right.value)
+            else:
+                deg = (0, expr.right)
+            expr = expr.left
+
+        op = None
+        content = None
+        if Expr.is_multiop(expr):
+            if expr.op == "+":
+                op = 1
+            elif expr.op == "*":
+                op = 0
+            content = tuple(term.binorder()[1] for term in expr.terms)
+        elif Expr.is_var(expr):
+            op = 2
+            content = ((1, (expr.value,)),)
+        elif Expr.is_num(expr):
+            op = 2
+            content = ((2, (expr.value,)),)
+
+        return (deg, content, op)
 
 
 # totally stole this from cmput274
@@ -305,7 +333,6 @@ class FieldSymbol(Symbol[_T_Field]):
             return self._S(a.value**b.value)
         raise ValueError("unsupported op")
 
-    # --- arithmetic operations ---
     def _add(self, value: "FieldSymbol[_T_Field]" | _T_Field):
         if not self._is_compatible(value):
             return NotImplemented
@@ -314,7 +341,7 @@ class FieldSymbol(Symbol[_T_Field]):
 
         # reorder to cannonical order
         # (assumes commutativity)
-        left, right = sorted((self, value), key=lambda x: x.expr.order())
+        left, right = sorted((self, value), key=lambda x: x.expr.binorder())
 
         # zero
         if right == self._S(0):
@@ -332,7 +359,7 @@ class FieldSymbol(Symbol[_T_Field]):
                 # Merge two addition MultiOps
                 # (assumes commutativity)
                 merged_terms = merge(
-                    left.expr.terms, right.expr.terms, key=lambda x: x.order()
+                    left.expr.terms, right.expr.terms, key=lambda x: x.multiorder()
                 )
                 return self._S(MultiOp("+", *merged_terms))
                 # TODO: combine like terms
@@ -349,7 +376,7 @@ class FieldSymbol(Symbol[_T_Field]):
                 # TODO: insert instead of resorting
                 # (assumes commutativity)
                 sorted_terms = sorted(
-                    addition_terms + (single_term,), key=lambda x: x.order()
+                    addition_terms + (single_term,), key=lambda x: x.multiorder()
                 )
                 return self._S(MultiOp("+", *sorted_terms))
                 # TODO: combine like terms
@@ -384,7 +411,7 @@ class FieldSymbol(Symbol[_T_Field]):
 
         # reorder to cannonical order
         # (assumes commutativity)
-        left, right = sorted((self, value), key=lambda x: x.expr.order())
+        left, right = sorted((self, value), key=lambda x: x.expr.binorder())
 
         # zero
         if right == self._S(0):
@@ -406,7 +433,7 @@ class FieldSymbol(Symbol[_T_Field]):
                 # Merge two addition MultiOps
                 # (assumes commutativity)
                 merged_terms = merge(
-                    left.expr.terms, right.expr.terms, key=lambda x: x.order()
+                    left.expr.terms, right.expr.terms, key=lambda x: x.multiorder()
                 )
                 return self._S(MultiOp("*", *merged_terms))
                 # TODO: combine like terms
@@ -423,7 +450,7 @@ class FieldSymbol(Symbol[_T_Field]):
                 # TODO: insert instead of resorting
                 # (assumes commutativity)
                 sorted_terms = sorted(
-                    addition_terms + (single_term,), key=lambda x: x.order()
+                    addition_terms + (single_term,), key=lambda x: x.multiorder()
                 )
                 return self._S(MultiOp("*", *sorted_terms))
                 # TODO: combine like terms
@@ -462,7 +489,7 @@ class FieldSymbol(Symbol[_T_Field]):
 
     def __neg__(self):
         return self.num_type(-1) * self
-    
+
     def __pos__(self):
         return self
 
