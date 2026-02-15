@@ -1,7 +1,8 @@
 from fractions import Fraction
 from typing import Protocol, Self, Any, TypeVar, Generic, Callable, TypeGuard
 from abc import ABC
-from functools import partial, cmp_to_key
+from functools import partial
+from heapq import merge
 
 
 # TODO: maybe make these support ints and floats
@@ -97,9 +98,79 @@ def Zmod(base: int, start=0):
     return _Zmod
 
 
+class Expr:
+    def __init__(self) -> None:
+        pass
+
+    @staticmethod
+    def is_atom(expr: "Expr") -> TypeGuard["Atom"]:
+        return isinstance(expr, Atom)
+
+    @staticmethod
+    def is_num(expr: "Expr") -> TypeGuard["Atom"]:
+        return isinstance(expr, Atom) and not isinstance(expr.value, str)
+
+    @staticmethod
+    def is_var(expr: "Expr") -> TypeGuard["Atom"]:
+        return isinstance(expr, Atom) and isinstance(expr.value, str)
+
+    @staticmethod
+    def is_binop(expr: "Expr", op=None) -> TypeGuard["BinOp"]:
+        return isinstance(expr, BinOp) and (op == None or expr.op == op)
+
+    @staticmethod
+    def is_multiop(expr: "Expr", op=None) -> TypeGuard["MultiOp"]:
+        return isinstance(expr, MultiOp) and (op == None or expr.op == op)
+
+    def order(self):
+        """
+        order is a tuple of
+        (deg, op, content)
+        if no **, treat as ** 1
+        if right of ** is num
+          deg is (1, int)
+        else
+          deg is (0, order)
+        op is int
+        if is op
+          content is (0,...)
+        if is var
+          content is (1,...)
+        if is num
+          content is (2,...)
+        """
+        expr = self
+
+        deg = (1, 1)
+        if Expr.is_binop(expr) and expr.op == "**":
+            if Expr.is_num(expr.right):
+                deg = (1, expr.right.value)
+            else:
+                deg = (0, expr.right)
+            expr = expr.left
+
+        op = None
+        content = None
+        if Expr.is_multiop(expr):
+            if expr.op == "+":
+                op = 1
+            elif expr.op == "*":
+                op = 0
+            # this is kinda too much nesting but at least no extending tuple
+            content = (0, tuple(term.order() for term in expr.terms))
+        elif Expr.is_var(expr):
+            op = 2
+            content = (1, expr.value)
+        elif Expr.is_num(expr) or Expr.is_var(expr):
+            op = 2
+            content = (2, expr.value)
+
+        return (deg, op, content)
+
+
 # totally stole this from cmput274
 # me when school actually teaches things
-class Atom:
+class Atom(Expr):
     def __init__(self, value) -> None:
         self.value = value
 
@@ -110,12 +181,12 @@ class Atom:
         if not isinstance(value, Atom):
             return NotImplemented
         return self.value == value.value
-    
+
     def __hash__(self) -> int:
         return hash(self.value)
 
 
-class BinOp:
+class BinOp(Expr):
     def __init__(self, left: "Expr", op: str, right: "Expr") -> None:
         self.left = left
         self.op = op
@@ -132,12 +203,24 @@ class BinOp:
             and self.left == value.left
             and self.right == value.right
         )
-    
+
     def __hash__(self) -> int:
-        return hash((self.left,self.op,self.right))
+        return hash((self.left, self.op, self.right))
 
 
-Expr = Atom | BinOp
+class MultiOp(Expr):
+    def __init__(self, op: str, *terms: "Expr") -> None:
+        self.op = op
+        self.terms = terms
+
+    def __repr__(self) -> str:
+        return f"({self.op.join(str(term) for term in self.terms)})"
+
+    def __eq__(self, value: object) -> bool:
+        if not isinstance(value, MultiOp):
+            return NotImplemented
+        return self.op == value.op and self.terms == value.terms
+
 
 T = TypeVar("T")
 _T_Field = TypeVar("_T_Field", bound=Field)
@@ -149,11 +232,12 @@ class Symbol(ABC, Generic[T]):
     ) -> None:
         # Note: terms should always be reduced
         self.num_type = num_type
+        self.expr: Expr
         if isinstance(symbol, Symbol):
             assert symbol.num_type == self.num_type
             self.expr = symbol.expr
         else:
-            self.expr: Expr = (
+            self.expr = (
                 symbol
                 if isinstance(symbol, Expr)
                 else Atom(symbol if isinstance(symbol, str) else self.num_type(symbol))
@@ -172,14 +256,6 @@ class Symbol(ABC, Generic[T]):
         """Constructor factory that returns instances of the concrete subclass."""
         return partial(self.__class__, num_type=self.num_type)
 
-    def is_num(self):
-        return isinstance(self.expr, Atom) and not isinstance(self.expr.value, str)
-
-    def is_var(self):
-        return isinstance(self.expr, Atom) and isinstance(self.expr.value, str)
-
-    def is_op(self):
-        return isinstance(self.expr, Expr)
 
 class FieldSymbol(Symbol[_T_Field]):
     def __init__(
@@ -212,10 +288,10 @@ class FieldSymbol(Symbol[_T_Field]):
     ) -> "FieldSymbol[_T_Field]":
         return value if isinstance(value, FieldSymbol) else self._S(value)
 
-    # TODO: redo this
+    # TODO: redo this, also reorder the params
     def _combine_atom_values(self, a: Expr, b: Expr, op: str):
         # callers should only call this when a and b are numeric Atoms — enforce at runtime
-        if not isinstance(a, Atom) or not isinstance(b, Atom):
+        if not (Expr.is_num(a) and Expr.is_num(b)):
             raise TypeError("_combine_atom_values expects Atom instances")
         if op == "+":
             return self._S(a.value + b.value)
@@ -229,47 +305,6 @@ class FieldSymbol(Symbol[_T_Field]):
             return self._S(a.value**b.value)
         raise ValueError("unsupported op")
 
-    # these 2 are so hacky i dont have words to describe it
-    @staticmethod
-    def compare(a: "FieldSymbol[_T_Field]", b: "FieldSymbol[_T_Field]"):
-        if (
-            isinstance(a.expr, BinOp)
-            and a.expr.op == "+"
-            and isinstance(b.expr, BinOp)
-            and b.expr.op == "*"
-        ):
-            return -1
-        if (
-            isinstance(a.expr, BinOp)
-            and a.expr.op == "*"
-            and isinstance(b.expr, BinOp)
-            and b.expr.op == "+"
-        ):
-            return 1
-        return (a.order() > b.order()) - (a.order() < b.order())
-
-    # TODO: clean up
-    def order(self):
-        if self.is_num():
-            assert isinstance(self.expr, Atom)  # kinda dumb that i have to do this
-            return (2, self.expr.value)
-        elif self.is_var():
-            assert isinstance(self.expr, Atom)
-            return (1, self.expr.value)
-        else:
-            assert isinstance(self.expr, BinOp)
-            if self.expr.op == "**":
-                return (0, self.expr)
-            elif self.expr.op == "*":
-                return max(
-                    self._S(self.expr.left).order(), self._S(self.expr.right).order()
-                )
-            elif self.expr.op == "+":
-                return max(
-                    self._S(self.expr.left).order(), self._S(self.expr.right).order()
-                )
-        return (float("inf"), self.expr)
-
     # --- arithmetic operations ---
     def _add(self, value: "FieldSymbol[_T_Field]" | _T_Field):
         if not self._is_compatible(value):
@@ -277,52 +312,51 @@ class FieldSymbol(Symbol[_T_Field]):
 
         value = self._coerce(value)
 
-        # commutativity
-        left, right = sorted((self, value), key=cmp_to_key(FieldSymbol.compare))
+        # reorder to cannonical order
+        # (assumes commutativity)
+        left, right = sorted((self, value), key=lambda x: x.expr.order())
 
         # zero
         if right == self._S(0):
             return left
 
         # combine numeric atoms
-        if left.is_num() and right.is_num():
+        if Expr.is_num(left.expr) and Expr.is_num(right.expr):
             return self._combine_atom_values(left.expr, right.expr, "+")
 
-        # associativity
-        if isinstance(right.expr, BinOp) and right.expr.op == "+":
-            return (left + self._S(right.expr.left)) + self._S(right.expr.right)
+        # combine existing +
+        # (assumes associativity)
+        if Expr.is_multiop(left.expr, "+") or Expr.is_multiop(right.expr, "+"):
+            # At least one side is an addition MultiOp
+            if Expr.is_multiop(left.expr, "+") and Expr.is_multiop(right.expr, "+"):
+                # Merge two addition MultiOps
+                # (assumes commutativity)
+                merged_terms = merge(
+                    left.expr.terms, right.expr.terms, key=lambda x: x.order()
+                )
+                return self._S(MultiOp("+", *merged_terms))
+                # TODO: combine like terms
+            else:
+                # Add a single term to an addition MultiOp
+                if Expr.is_multiop(left.expr, "+"):
+                    addition_terms = left.expr.terms
+                    single_term = right.expr
+                else:  # right_is_addition
+                    assert Expr.is_multiop(right.expr, "+")  # this is annoying
+                    addition_terms = right.expr.terms
+                    single_term = left.expr
 
-        # combine like terms
-        if left == right:
-            return left * self.num_type(2)
-        if (
-            isinstance(left.expr, BinOp)
-            and left.expr.op == "*"
-            and self._S(left.expr.right).is_num()
-            and left.expr.left == right.expr
-        ):
-            return right * (self._S(left.expr.right) + self.num_type(1))
-        if (
-            isinstance(right.expr, BinOp)
-            and right.expr.op == "*"
-            and self._S(right.expr.right).is_num()
-            and right.expr.left == left.expr
-        ):
-            return left * (self._S(right.expr.right) + self.num_type(1))
-        if (
-            isinstance(right.expr, BinOp)
-            and right.expr.op == "*"
-            and self._S(right.expr.right).is_num()
-            and isinstance(left.expr, BinOp)
-            and left.expr.op == "*"
-            and self._S(left.expr.right).is_num()
-            and right.expr.left == left.expr.left
-        ):
-            return self._S(left.expr.left) * (
-                self._S(left.expr.right) + self._S(right.expr.right)
-            )
+                # TODO: insert instead of resorting
+                # (assumes commutativity)
+                sorted_terms = sorted(
+                    addition_terms + (single_term,), key=lambda x: x.order()
+                )
+                return self._S(MultiOp("+", *sorted_terms))
+                # TODO: combine like terms
 
-        return self._S(BinOp(left.expr, "+", right.expr))
+        # If neither is addition, fall through to other logic
+
+        return self._S(MultiOp("+", left.expr, right.expr))
 
     __add__, __radd__ = _add, _add
 
@@ -348,8 +382,9 @@ class FieldSymbol(Symbol[_T_Field]):
 
         value = self._coerce(value)
 
-        # commutativity
-        left, right = sorted((self, value), key=cmp_to_key(FieldSymbol.compare))
+        # reorder to cannonical order
+        # (assumes commutativity)
+        left, right = sorted((self, value), key=lambda x: x.expr.order())
 
         # zero
         if right == self._S(0):
@@ -360,55 +395,44 @@ class FieldSymbol(Symbol[_T_Field]):
             return left
 
         # combine numeric atoms
-        if left.is_num() and right.is_num():
+        if Expr.is_num(left.expr) and Expr.is_num(right.expr):
             return self._combine_atom_values(left.expr, right.expr, "*")
 
-        # associativity
-        if isinstance(right.expr, BinOp) and right.expr.op == "*":
-            return (left * self._S(right.expr.left)) * self._S(right.expr.right)
+        # combine existing +
+        # (assumes associativity)
+        if Expr.is_multiop(left.expr, "*") or Expr.is_multiop(right.expr, "*"):
+            # At least one side is an addition MultiOp
+            if Expr.is_multiop(left.expr, "*") and Expr.is_multiop(right.expr, "*"):
+                # Merge two addition MultiOps
+                # (assumes commutativity)
+                merged_terms = merge(
+                    left.expr.terms, right.expr.terms, key=lambda x: x.order()
+                )
+                return self._S(MultiOp("*", *merged_terms))
+                # TODO: combine like terms
+            else:
+                # Add a single term to an addition MultiOp
+                if Expr.is_multiop(left.expr, "*"):
+                    addition_terms = left.expr.terms
+                    single_term = right.expr
+                else:  # right_is_addition
+                    assert Expr.is_multiop(right.expr, "*")  # this is annoying
+                    addition_terms = right.expr.terms
+                    single_term = left.expr
 
-        # inverse
-        if (
-            isinstance(left.expr, BinOp)
-            and left.expr.op == "**"
-            and left.expr.right == Atom(self.num_type(-1))
-            and left.expr.left == right.expr
-        ):
-            return self._S(1)
-        
-        # # combine like terms
-        # if left == right:
-        #     return left ** self.num_type(2)
-        # if (
-        #     isinstance(left.expr, BinOp)
-        #     and left.expr.op == "**"
-        #     and self._S(left.expr.right).is_num()
-        #     and left.expr.left == right.expr
-        # ):
-        #     return right ** (self._S(left.expr.right) + self.num_type(1))
-        # if (
-        #     isinstance(right.expr, BinOp)
-        #     and right.expr.op == "**"
-        #     and self._S(right.expr.right).is_num()
-        #     and right.expr.left == left.expr
-        # ):
-        #     return left ** (self._S(right.expr.right) + self.num_type(1))
-        # if (
-        #     isinstance(right.expr, BinOp)
-        #     and right.expr.op == "**"
-        #     and self._S(right.expr.right).is_num()
-        #     and isinstance(left.expr, BinOp)
-        #     and left.expr.op == "**"
-        #     and self._S(left.expr.right).is_num()
-        #     and right.expr.left == left.expr.left
-        # ):
-        #     return self._S(left.expr.left) ** (
-        #         self._S(left.expr.right) + self._S(right.expr.right)
-        #     )
+                # TODO: insert instead of resorting
+                # (assumes commutativity)
+                sorted_terms = sorted(
+                    addition_terms + (single_term,), key=lambda x: x.order()
+                )
+                return self._S(MultiOp("*", *sorted_terms))
+                # TODO: combine like terms
+
+        # If neither is addition, fall through to other logic
 
         # TODO: distributivity
 
-        return self._S(BinOp(left.expr, "*", right.expr))
+        return self._S(MultiOp("*", left.expr, right.expr))
 
     __mul__, __rmul__ = _mul, _mul
 
@@ -438,6 +462,9 @@ class FieldSymbol(Symbol[_T_Field]):
 
     def __neg__(self):
         return self.num_type(-1) * self
+    
+    def __pos__(self):
+        return self
 
     def __pow__(self, value: "FieldSymbol[_T_Field]" | _T_Field):
         if not self._is_compatible(value):
@@ -448,7 +475,7 @@ class FieldSymbol(Symbol[_T_Field]):
         if self == self._S(1) or value == self._S(0):
             return self._S(1)
 
-        if self.is_num() and value.is_num():
+        if Expr.is_num(self.expr) and Expr.is_num(value.expr):
             return self._combine_atom_values(self.expr, value.expr, "**")
 
         return self._S(BinOp(self.expr, "**", value.expr))
@@ -462,11 +489,11 @@ class FieldSymbol(Symbol[_T_Field]):
         if value == self._S(1) or self == self._S(0):
             return self._S(1)
 
-        if self.is_num() and value.is_num():
+        if Expr.is_num(self.expr) and Expr.is_num(value.expr):
             return self._combine_atom_values(value.expr, self.expr, "**")
 
         return self._S(BinOp(value.expr, "**", self.expr))
-    
+
     def __hash__(self) -> int:
         return hash(self.expr)
 
@@ -477,11 +504,10 @@ class FieldSymbol(Symbol[_T_Field]):
 # not that we weren't already
 # but this is way out of hand for the original scope
 
-
-Fraction.__repr__ = lambda self: (
-    str(self.numerator // self.denominator)
-    if self.numerator % self.denominator == 0
-    else f"{self.numerator}/{self.denominator}"
+Fraction.__repr__ = lambda self: (  # type: ignore
+    str(self.numerator // self.denominator)  # type: ignore
+    if self.numerator % self.denominator == 0  # type: ignore
+    else f"{self.numerator}/{self.denominator}"  # type: ignore
 )
 
 __all__ = ["Ring", "Field", "Zmod", "Fraction", "FieldSymbol"]
