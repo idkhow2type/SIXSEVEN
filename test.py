@@ -190,8 +190,8 @@ class TestFieldSymbol(unittest.TestCase):
 
         x = FieldSymbol("x", Fraction)
         # numeric atoms sort before string atoms, so result should be (1+x)
-        self.assertEqual(str(x + FieldSymbol(1, Fraction)), "(1+x)")
-        self.assertEqual(str(FieldSymbol(1, Fraction) + x), "(1+x)")
+        self.assertEqual(str(x + FieldSymbol(1, Fraction)), "(x+1)")
+        self.assertEqual(str(FieldSymbol(1, Fraction) + x), "(x+1)")
 
     def test_identity_and_zero(self):
         x = FieldSymbol("x", Fraction)
@@ -225,7 +225,7 @@ class TestFieldSymbol(unittest.TestCase):
     def test_negation_and_equality(self):
         x = FieldSymbol("x", Fraction)
         neg_x = -x
-        self.assertEqual(str(neg_x), "(-1*x)")
+        self.assertEqual(str(neg_x), "(x*-1)")
         self.assertEqual(str(neg_x + x), "0")
 
         # constructor should accept another FieldSymbol of the same num_type
@@ -248,7 +248,7 @@ class TestFieldSymbol(unittest.TestCase):
         res = x + Fraction(1)
         self.assertIsInstance(res, FieldSymbol)
         # numeric atom should be a Fraction(1)
-        self.assertEqual(str(res), "(1+x)")
+        self.assertEqual(str(res), "(x+1)")
 
     def test_long_numeric_sum(self):
         S0 = FieldSymbol(0, Fraction)

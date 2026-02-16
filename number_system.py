@@ -1,5 +1,5 @@
 from fractions import Fraction
-from typing import Protocol, Self, Any, TypeVar, Generic, Callable, TypeGuard
+from typing import Protocol, Self, Any, TypeVar, Generic, Callable, TypeGuard, cast
 from abc import ABC
 from functools import partial
 from heapq import merge
@@ -103,6 +103,7 @@ class Expr:
     def is_atom(expr: "Expr") -> TypeGuard["Atom"]:
         return isinstance(expr, Atom)
 
+    # TODO: make these type guard the type of .value as well
     @staticmethod
     def is_num(expr: "Expr") -> TypeGuard["Atom"]:
         return isinstance(expr, Atom) and not isinstance(expr.value, str)
@@ -343,6 +344,8 @@ class FieldSymbol(Symbol[_T_Field]):
         # (assumes commutativity)
         left, right = sorted((self, value), key=lambda x: x.expr.binorder())
 
+        # side note: this now looks so coughing baby vs hydrogen bomb
+        # just a teeny tiny optimisation in an abyss of inefficiencies
         # zero
         if right == self._S(0):
             return left
@@ -353,37 +356,54 @@ class FieldSymbol(Symbol[_T_Field]):
 
         # combine existing +
         # (assumes associativity)
-        if Expr.is_multiop(left.expr, "+") or Expr.is_multiop(right.expr, "+"):
-            # At least one side is an addition MultiOp
-            if Expr.is_multiop(left.expr, "+") and Expr.is_multiop(right.expr, "+"):
-                # Merge two addition MultiOps
-                # (assumes commutativity)
-                merged_terms = merge(
-                    left.expr.terms, right.expr.terms, key=lambda x: x.multiorder()
-                )
-                return self._S(MultiOp("+", *merged_terms))
-                # TODO: combine like terms
+        left = (
+            left
+            if Expr.is_multiop(left.expr, "+")
+            else self._S(MultiOp("+", left.expr))
+        )
+        right = (
+            right
+            if Expr.is_multiop(right.expr, "+")
+            else self._S(MultiOp("+", right.expr))
+        )
+        
+        assert Expr.is_multiop(left.expr, "+") and Expr.is_multiop(right.expr, "+")
+        terms = merge(left.expr.terms, right.expr.terms, key=lambda x: x.multiorder())
+
+        cumm_scale: _T_Field = self.num_type(0)
+        curr: Expr | None = None
+        combined: list[FieldSymbol] = []
+        for term in terms:
+            scale = self.num_type(1)
+            if Expr.is_multiop(term, "*") and Expr.is_num(term.terms[-1]):
+                scale = cast(_T_Field, term.terms[-1].value)
+                if len(term.terms) > 2:
+                    term = MultiOp("*", *term.terms[:-1])
+                else:
+                    assert len(term.terms) > 0
+                    term = term.terms[0]
+            elif Expr.is_num(term):
+                scale = cast(_T_Field, term.value)
+                term = Atom(self.num_type(1))
+
+            if curr == None:
+                curr = term
+                cumm_scale = scale
+            elif curr == term:
+                cumm_scale += scale
             else:
-                # Add a single term to an addition MultiOp
-                if Expr.is_multiop(left.expr, "+"):
-                    addition_terms = left.expr.terms
-                    single_term = right.expr
-                else:  # right_is_addition
-                    assert Expr.is_multiop(right.expr, "+")  # this is annoying
-                    addition_terms = right.expr.terms
-                    single_term = left.expr
+                if cumm_scale != self.num_type(0):
+                    combined.append(self._S(curr) * cumm_scale)
+                cumm_scale = scale
+                curr = term
+        if cumm_scale != self.num_type(0):
+            combined.append(self._S(curr) * cumm_scale)
 
-                # TODO: insert instead of resorting
-                # (assumes commutativity)
-                sorted_terms = sorted(
-                    addition_terms + (single_term,), key=lambda x: x.multiorder()
-                )
-                return self._S(MultiOp("+", *sorted_terms))
-                # TODO: combine like terms
-
-        # If neither is addition, fall through to other logic
-
-        return self._S(MultiOp("+", left.expr, right.expr))
+        return (
+            self._S(MultiOp("+", *(term.expr for term in combined)))
+            if len(combined) > 1
+            else self._S(0)
+        )
 
     __add__, __radd__ = _add, _add
 
@@ -425,41 +445,55 @@ class FieldSymbol(Symbol[_T_Field]):
         if Expr.is_num(left.expr) and Expr.is_num(right.expr):
             return self._combine_atom_values(left.expr, right.expr, "*")
 
-        # combine existing +
+        # combine existing *
         # (assumes associativity)
-        if Expr.is_multiop(left.expr, "*") or Expr.is_multiop(right.expr, "*"):
-            # At least one side is an addition MultiOp
-            if Expr.is_multiop(left.expr, "*") and Expr.is_multiop(right.expr, "*"):
-                # Merge two addition MultiOps
-                # (assumes commutativity)
-                merged_terms = merge(
-                    left.expr.terms, right.expr.terms, key=lambda x: x.multiorder()
-                )
-                return self._S(MultiOp("*", *merged_terms))
-                # TODO: combine like terms
+        left = (
+            left
+            if Expr.is_multiop(left.expr, "*")
+            else self._S(MultiOp("*", left.expr))
+        )
+        right = (
+            right
+            if Expr.is_multiop(right.expr, "*")
+            else self._S(MultiOp("*", right.expr))
+        )
+        
+        assert Expr.is_multiop(left.expr, "*") and Expr.is_multiop(right.expr, "*")
+        # TODO: remove tuple
+        terms = tuple(merge(left.expr.terms, right.expr.terms, key=lambda x: x.multiorder()))
+
+        cumm_pow: _T_Field = self.num_type(0)
+        cumm_curr: FieldSymbol | None = None
+        combined: list[FieldSymbol] = []
+        for term in terms:
+            term_pow = self.num_type(1)
+            if Expr.is_binop(term, "**") and Expr.is_num(term.right):
+                term_pow = cast(_T_Field, term.right.value)
+                term = term.left
+            term = self._S(term)
+
+            if cumm_curr == None:
+                cumm_curr = term
+                cumm_pow = term_pow
+            elif Expr.is_num(cumm_curr.expr):
+                cumm_curr *= term
+            elif cumm_curr == term:
+                cumm_pow += term_pow
             else:
-                # Add a single term to an addition MultiOp
-                if Expr.is_multiop(left.expr, "*"):
-                    addition_terms = left.expr.terms
-                    single_term = right.expr
-                else:  # right_is_addition
-                    assert Expr.is_multiop(right.expr, "*")  # this is annoying
-                    addition_terms = right.expr.terms
-                    single_term = left.expr
+                if cumm_pow != self.num_type(0):
+                    combined.append(cumm_curr**cumm_pow)
+                cumm_pow = term_pow
+                cumm_curr = term
+        if cumm_pow != self.num_type(0):
+            combined.append(self._S(cumm_curr) ** cumm_pow)
 
-                # TODO: insert instead of resorting
-                # (assumes commutativity)
-                sorted_terms = sorted(
-                    addition_terms + (single_term,), key=lambda x: x.multiorder()
-                )
-                return self._S(MultiOp("*", *sorted_terms))
-                # TODO: combine like terms
-
-        # If neither is addition, fall through to other logic
+        return (
+            self._S(MultiOp("*", *(term.expr for term in combined)))
+            if len(combined) > 1
+            else self._S(1)
+        )
 
         # TODO: distributivity
-
-        return self._S(MultiOp("*", left.expr, right.expr))
 
     __mul__, __rmul__ = _mul, _mul
 
@@ -501,6 +535,8 @@ class FieldSymbol(Symbol[_T_Field]):
 
         if self == self._S(1) or value == self._S(0):
             return self._S(1)
+        if value == self._S(1):
+            return self
 
         if Expr.is_num(self.expr) and Expr.is_num(value.expr):
             return self._combine_atom_values(self.expr, value.expr, "**")
@@ -515,6 +551,8 @@ class FieldSymbol(Symbol[_T_Field]):
 
         if value == self._S(1) or self == self._S(0):
             return self._S(1)
+        if self == self._S(1):
+            return value
 
         if Expr.is_num(self.expr) and Expr.is_num(value.expr):
             return self._combine_atom_values(value.expr, self.expr, "**")
