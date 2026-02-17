@@ -124,6 +124,10 @@ class Expr:
     # for the rest of time, to maintain the safety and prosperity of humanity
     # it is not DRY, soaking wet even, it doesn't even do it's job perfectly
     # but it's well enough
+
+    # UPDATE: binorder is really more trouble than it's worth, but multiorder
+    # depends on it so can't remove it yet. Maybe one day a man with more
+    # courage can rewrite multiorder and put an end to all this
     def binorder(self):
         """
         order is a tuple of
@@ -340,15 +344,15 @@ class FieldSymbol(Symbol[_T_Field]):
 
         value = self._coerce(value)
 
-        # reorder to cannonical order
-        # (assumes commutativity)
-        left, right = sorted((self, value), key=lambda x: x.expr.binorder())
+        left, right = self, value
 
         # side note: this now looks so coughing baby vs hydrogen bomb
         # just a teeny tiny optimisation in an abyss of inefficiencies
         # zero
         if right == self._S(0):
             return left
+        if left == self._S(0):
+            return right
 
         # combine numeric atoms
         if Expr.is_num(left.expr) and Expr.is_num(right.expr):
@@ -366,7 +370,7 @@ class FieldSymbol(Symbol[_T_Field]):
             if Expr.is_multiop(right.expr, "+")
             else self._S(MultiOp("+", right.expr))
         )
-        
+
         assert Expr.is_multiop(left.expr, "+") and Expr.is_multiop(right.expr, "+")
         terms = merge(left.expr.terms, right.expr.terms, key=lambda x: x.multiorder())
 
@@ -429,17 +433,37 @@ class FieldSymbol(Symbol[_T_Field]):
 
         value = self._coerce(value)
 
-        # reorder to cannonical order
-        # (assumes commutativity)
-        left, right = sorted((self, value), key=lambda x: x.expr.binorder())
+        left, right = self, value
 
         # zero
         if right == self._S(0):
+            return self._S(0)
+        if left == self._S(0):
             return self._S(0)
 
         # one
         if right == self._S(1):
             return left
+        if left == self._S(1):
+            return right
+
+        add_term = None
+        comm_term = None
+        if Expr.is_multiop(left.expr, "+"):
+            add_term = left
+            comm_term = right
+        elif Expr.is_multiop(right.expr, "+"):
+            add_term = right
+            comm_term = left
+        if add_term and comm_term:
+            assert Expr.is_multiop(add_term.expr, "+")
+            # res: list[Expr] = []
+            res = self._S(0)
+            for term in add_term.expr.terms:
+                # res.append((comm_term * self._S(term)).expr)
+                res += comm_term * self._S(term)
+            # return self._S(MultiOp("+", *res))
+            return res
 
         # combine numeric atoms
         if Expr.is_num(left.expr) and Expr.is_num(right.expr):
@@ -457,10 +481,11 @@ class FieldSymbol(Symbol[_T_Field]):
             if Expr.is_multiop(right.expr, "*")
             else self._S(MultiOp("*", right.expr))
         )
-        
+
         assert Expr.is_multiop(left.expr, "*") and Expr.is_multiop(right.expr, "*")
-        # TODO: remove tuple
-        terms = tuple(merge(left.expr.terms, right.expr.terms, key=lambda x: x.multiorder()))
+        terms = tuple(
+            merge(left.expr.terms, right.expr.terms, key=lambda x: x.multiorder())
+        )
 
         cumm_pow: _T_Field = self.num_type(0)
         cumm_curr: FieldSymbol | None = None
@@ -480,18 +505,18 @@ class FieldSymbol(Symbol[_T_Field]):
             elif cumm_curr == term:
                 cumm_pow += term_pow
             else:
-                if cumm_pow != self.num_type(0):
+                if cumm_pow != self.num_type(0) and cumm_curr != self._S(1):
                     combined.append(cumm_curr**cumm_pow)
                 cumm_pow = term_pow
                 cumm_curr = term
-        if cumm_pow != self.num_type(0):
+        if cumm_pow != self.num_type(0) and cumm_curr != self._S(1):
             combined.append(self._S(cumm_curr) ** cumm_pow)
 
-        return (
-            self._S(MultiOp("*", *(term.expr for term in combined)))
-            if len(combined) > 1
-            else self._S(1)
-        )
+        if len(combined) == 0:
+            return self._S(1)
+        if len(combined) == 1:
+            return combined[0]
+        return self._S(MultiOp("*", *(term.expr for term in combined)))
 
         # TODO: distributivity
 
@@ -507,7 +532,7 @@ class FieldSymbol(Symbol[_T_Field]):
         if value == self._S(0):
             raise ZeroDivisionError
 
-        return self * self._S(value ** self.num_type(-1))
+        return cast(FieldSymbol[_T_Field], self * self._S(value ** self.num_type(-1)))
 
     def __rtruediv__(self, value: "FieldSymbol[_T_Field]" | _T_Field):
         if not self._is_compatible(value):
@@ -518,8 +543,7 @@ class FieldSymbol(Symbol[_T_Field]):
         # division by zero
         if self == self._S(0):
             raise ZeroDivisionError
-
-        return value * self._S(self ** self.num_type(-1))
+        return cast(FieldSymbol[_T_Field], value * self._S(self ** self.num_type(-1)))
 
     def __neg__(self):
         return self.num_type(-1) * self
@@ -537,6 +561,8 @@ class FieldSymbol(Symbol[_T_Field]):
             return self._S(1)
         if value == self._S(1):
             return self
+        if Expr.is_binop(self.expr, "**"):
+            return self._S(self.expr.left) ** (self._S(self.expr.right) * value)
 
         if Expr.is_num(self.expr) and Expr.is_num(value.expr):
             return self._combine_atom_values(self.expr, value.expr, "**")
@@ -553,6 +579,8 @@ class FieldSymbol(Symbol[_T_Field]):
             return self._S(1)
         if self == self._S(1):
             return value
+        if Expr.is_binop(value.expr, "**"):
+            return self._S(value.expr.left) ** (self._S(value.expr.right) * self)
 
         if Expr.is_num(self.expr) and Expr.is_num(value.expr):
             return self._combine_atom_values(value.expr, self.expr, "**")

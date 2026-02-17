@@ -55,4 +55,4 @@ print(mat.det()) # this is the correct deteminant trust
 - [ ] Refactor `Zmod` to bind pattern
 - [ ] Implement default `num_type` for `FieldSymbol` or rework that system entirely
 - [ ] Split up files and make some folders
-- [ ] Update unit tests
+- [x] Update unit tests
