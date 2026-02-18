@@ -156,10 +156,10 @@ class Matrix(Generic[_T_Ring]):
             raise ValueError
 
         return Matrix(
-            *[[dot(a.row(i), b.col(j)) for j in range(b.cols)] for i in range(a.rows)],
+            *[[dot(a.row(i), b.col(j)) for j in range(b.cols)] for i in range(a.rows)],num_type=a.num_type
         )
 
-    __matmul__, __rmatmul__ = _matmul, lambda a, b: Matrix._matmul(b, a)
+    __matmul__, __rmatmul__ = lambda a, b: Matrix._matmul(a,b), lambda a, b: Matrix._matmul(b, a)
 
     # * small note for above
     # i dont like how some of the private methods are static but others arent

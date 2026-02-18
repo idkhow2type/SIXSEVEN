@@ -19,6 +19,24 @@ class Field(Ring, Protocol):
     def __truediv__(self, other: Self, /) -> Self: ...
     def __rtruediv__(self, other: Self, /) -> Self: ...
 
+# * partial init with proper generics
+# from typing import TypeVar, Generic, Callable
+
+# T=TypeVar("T")
+
+# class Base(Generic[T]):
+#     def __init__(self, arg:T, arg2:int) -> None:
+#         self.val=arg
+#         self.val2=arg2
+
+#     @staticmethod
+#     def make(arg: float):
+#         f: Callable[[int]] = lambda arg2: Base(arg, arg2)
+#         return f
+
+# b=Base.make(1)
+# b(2)
+
 
 def Zmod(base: int, start=0):
     class _Zmod:
@@ -314,10 +332,10 @@ class FieldSymbol(Symbol[_T_Field]):
     def _is_compatible(self, value: object):
         return (
             isinstance(value, FieldSymbol) and self.num_type == value.num_type
-        ) or type(value) == self.num_type
+        ) or type(value) in [self.num_type,int,float]
 
     def _coerce(
-        self, value: "FieldSymbol[_T_Field] | _T_Field"
+        self, value: "FieldSymbol[_T_Field] | _T_Field | int | float"
     ) -> "FieldSymbol[_T_Field]":
         return value if isinstance(value, FieldSymbol) else self._S(value)
 
@@ -338,7 +356,7 @@ class FieldSymbol(Symbol[_T_Field]):
             return self._S(a.value**b.value)
         raise ValueError("unsupported op")
 
-    def _add(self, value: "FieldSymbol[_T_Field]" | _T_Field):
+    def _add(self, value: "FieldSymbol[_T_Field]" | _T_Field | int | float):
         if not self._is_compatible(value):
             return NotImplemented
 
@@ -372,7 +390,7 @@ class FieldSymbol(Symbol[_T_Field]):
         )
 
         assert Expr.is_multiop(left.expr, "+") and Expr.is_multiop(right.expr, "+")
-        terms = merge(left.expr.terms, right.expr.terms, key=lambda x: x.multiorder())
+        terms = tuple(merge(left.expr.terms, right.expr.terms, key=lambda x: x.multiorder()))
 
         cumm_scale: _T_Field = self.num_type(0)
         curr: Expr | None = None
@@ -411,7 +429,7 @@ class FieldSymbol(Symbol[_T_Field]):
 
     __add__, __radd__ = _add, _add
 
-    def __sub__(self, value: "FieldSymbol[_T_Field]" | _T_Field):
+    def __sub__(self, value: "FieldSymbol[_T_Field]" | _T_Field | int | float):
         if not self._is_compatible(value):
             return NotImplemented
 
@@ -419,15 +437,15 @@ class FieldSymbol(Symbol[_T_Field]):
 
         return self + self.num_type(-1) * value
 
-    def __rsub__(self, value: "FieldSymbol[_T_Field]" | _T_Field):
+    def __rsub__(self, value: "FieldSymbol[_T_Field]" | _T_Field | int | float):
         if not self._is_compatible(value):
             return NotImplemented
 
         value = self._coerce(value)
 
-        return value + self.num_type(-1) * self
+        return cast(FieldSymbol[_T_Field],value + self.num_type(-1) * self)
 
-    def _mul(self, value: "FieldSymbol[_T_Field]" | _T_Field):
+    def _mul(self, value: "FieldSymbol[_T_Field]" | _T_Field | int | float):
         if not self._is_compatible(value):
             return NotImplemented
 
@@ -455,7 +473,7 @@ class FieldSymbol(Symbol[_T_Field]):
         elif Expr.is_multiop(right.expr, "+"):
             add_term = right
             comm_term = left
-        if add_term and comm_term:
+        if add_term != None and comm_term != None:
             assert Expr.is_multiop(add_term.expr, "+")
             # res: list[Expr] = []
             res = self._S(0)
@@ -463,7 +481,7 @@ class FieldSymbol(Symbol[_T_Field]):
                 # res.append((comm_term * self._S(term)).expr)
                 res += comm_term * self._S(term)
             # return self._S(MultiOp("+", *res))
-            return res
+            return cast(FieldSymbol[_T_Field],res)
 
         # combine numeric atoms
         if Expr.is_num(left.expr) and Expr.is_num(right.expr):
@@ -500,7 +518,7 @@ class FieldSymbol(Symbol[_T_Field]):
             if cumm_curr == None:
                 cumm_curr = term
                 cumm_pow = term_pow
-            elif Expr.is_num(cumm_curr.expr):
+            elif Expr.is_num(cumm_curr.expr) and Expr.is_num(term.expr):
                 cumm_curr *= term
             elif cumm_curr == term:
                 cumm_pow += term_pow
@@ -522,7 +540,7 @@ class FieldSymbol(Symbol[_T_Field]):
 
     __mul__, __rmul__ = _mul, _mul
 
-    def __truediv__(self, value: "FieldSymbol[_T_Field]" | _T_Field):
+    def __truediv__(self, value: "FieldSymbol[_T_Field]" | _T_Field | int | float):
         if not self._is_compatible(value):
             return NotImplemented
 
@@ -534,7 +552,7 @@ class FieldSymbol(Symbol[_T_Field]):
 
         return cast(FieldSymbol[_T_Field], self * self._S(value ** self.num_type(-1)))
 
-    def __rtruediv__(self, value: "FieldSymbol[_T_Field]" | _T_Field):
+    def __rtruediv__(self, value: "FieldSymbol[_T_Field]" | _T_Field | int | float):
         if not self._is_compatible(value):
             return NotImplemented
 
@@ -551,7 +569,7 @@ class FieldSymbol(Symbol[_T_Field]):
     def __pos__(self):
         return self
 
-    def __pow__(self, value: "FieldSymbol[_T_Field]" | _T_Field):
+    def __pow__(self, value: "FieldSymbol[_T_Field]" | _T_Field | int | float):
         if not self._is_compatible(value):
             return NotImplemented
 
@@ -562,14 +580,14 @@ class FieldSymbol(Symbol[_T_Field]):
         if value == self._S(1):
             return self
         if Expr.is_binop(self.expr, "**"):
-            return self._S(self.expr.left) ** (self._S(self.expr.right) * value)
+            return cast(FieldSymbol[_T_Field],self._S(self.expr.left) ** (self._S(self.expr.right) * value))
 
         if Expr.is_num(self.expr) and Expr.is_num(value.expr):
             return self._combine_atom_values(self.expr, value.expr, "**")
 
         return self._S(BinOp(self.expr, "**", value.expr))
 
-    def __rpow__(self, value: "FieldSymbol[_T_Field]" | _T_Field):
+    def __rpow__(self, value: "FieldSymbol[_T_Field]" | _T_Field | int | float):
         if not self._is_compatible(value):
             return NotImplemented
 

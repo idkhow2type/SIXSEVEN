@@ -51,8 +51,11 @@ print(mat.det()) # this is the correct deteminant trust
 - [x] Unary `-`/`+`
 - [ ] Replace `__init__` with `__new__` (maybe but probably not)
 - [ ] Implement equal for Matrix and Vector
-- [ ] Symbol support for ops with `int` and `float`
+- [x] Symbol support for ops with `int` and `float`
 - [ ] Refactor `Zmod` to bind pattern
 - [ ] Implement default `num_type` for `FieldSymbol` or rework that system entirely
 - [ ] Split up files and make some folders
 - [x] Update unit tests
+- [ ] Rewrite the entire add and mult term grouping again
+    - No more sorting as preprocessing, really expensive and doesn't work that well
+    - Still need sorting for display mostly, so who knows?
