@@ -40,8 +40,12 @@ class Field(Ring, Protocol):
 
 def Zmod(base: int, start=0):
     class _Zmod:
-        def __init__(self, num: int) -> None:
-            self.num: int = (num) % (base)
+        def __init__(self, num: 'int | _Zmod') -> None:
+            if isinstance(num,_Zmod):
+                assert num.base == base
+                self.num = num.num
+            else:
+                self.num: int = (num) % (base)
             self.base = base
             for i in range(base):
                 if ((self.num * i) % (self.base)) == 1:
@@ -116,6 +120,20 @@ def Zmod(base: int, start=0):
     return _Zmod
 
 
+class ReverseOrder:
+    def __init__(self, value):
+        self.value = value
+
+    def __lt__(self, other):
+        # Reverse the "less than" logic
+        return self.value > other.value
+
+    def __eq__(self, other):
+        return self.value == other.value
+    
+    def __repr__(self) -> str:
+        return str(self.value)
+
 class Expr:
     @staticmethod
     def is_atom(expr: "Expr") -> TypeGuard["Atom"]:
@@ -168,7 +186,7 @@ class Expr:
         deg = (1, 1)
         if Expr.is_binop(expr) and expr.op == "**":
             if Expr.is_num(expr.right):
-                deg = (1, expr.right.value)
+                deg = (1, abs(expr.right.value))
             else:
                 deg = (0, expr.right)
             expr = expr.left
@@ -186,9 +204,11 @@ class Expr:
             content = (1, (expr.value,))
         elif Expr.is_num(expr):
             op = 2
-            content = (2, (expr.value,))
+            # this might not work for everything
+            content = (2, (abs(expr.value),))
 
-        return (deg, content, op)
+        return (ReverseOrder(deg), content, op)
+        # return (content, op,deg)
 
     def multiorder(self):
         expr = self
@@ -196,7 +216,7 @@ class Expr:
         deg = (1, 1)
         if Expr.is_binop(expr) and expr.op == "**":
             if Expr.is_num(expr.right):
-                deg = (1, expr.right.value)
+                deg = (1, abs(expr.right.value))
             else:
                 deg = (0, expr.right)
             expr = expr.left
@@ -214,9 +234,10 @@ class Expr:
             content = ((1, (expr.value,)),)
         elif Expr.is_num(expr):
             op = 2
-            content = ((2, (expr.value,)),)
+            content = ((2, (abs(expr.value),)),)
 
-        return (deg, content, op)
+        return (ReverseOrder(deg), content, op)
+        # return (content, op,deg)
 
 
 # totally stole this from cmput274
@@ -421,11 +442,11 @@ class FieldSymbol(Symbol[_T_Field]):
         if cumm_scale != self.num_type(0):
             combined.append(self._S(curr) * cumm_scale)
 
-        return (
-            self._S(MultiOp("+", *(term.expr for term in combined)))
-            if len(combined) > 1
-            else self._S(0)
-        )
+        if len(combined) == 0:
+            return self._S(0)
+        if len(combined) == 1:
+            return combined[0]
+        return self._S(MultiOp("+", *(term.expr for term in combined)))
 
     __add__, __radd__ = _add, _add
 

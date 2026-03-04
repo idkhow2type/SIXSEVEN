@@ -1,4 +1,4 @@
-from typing import TypeVar, Generic, Sequence, Callable, Any, cast, Literal
+from typing import TypeVar, Generic, Sequence, Callable, Any, cast, Literal, overload
 from .number_system import *
 from .config import CONFIG
 
@@ -116,10 +116,12 @@ class Matrix(Generic[_T_Ring]):
 
     # TODO: row and col should be generators
     def row(self, i: int) -> Vector[_T_Ring]:
-        return Vector(*self._data[i],num_type=self.num_type)
+        return Vector(*self._data[i], num_type=self.num_type)
 
     def col(self, j: int) -> Vector[_T_Ring]:
-        return Vector(*(self._data[i][j] for i in range(self.rows)),num_type=self.num_type)
+        return Vector(
+            *(self._data[i][j] for i in range(self.rows)), num_type=self.num_type
+        )
 
     def _add(self, other: "Matrix[_T_Ring]") -> "Matrix[_T_Ring]":
         return Matrix(
@@ -156,10 +158,19 @@ class Matrix(Generic[_T_Ring]):
             raise ValueError
 
         return Matrix(
-            *[[dot(a.row(i), b.col(j)) for j in range(b.cols)] for i in range(a.rows)],num_type=a.num_type
+            *[[dot(a.row(i), b.col(j)) for j in range(b.cols)] for i in range(a.rows)],
+            num_type=a.num_type,
         )
 
-    __matmul__, __rmatmul__ = lambda a, b: Matrix._matmul(a,b), lambda a, b: Matrix._matmul(b, a)
+    def __matmul__(
+        self: "Matrix[_T_Ring]", other: "Matrix[_T_Ring]"
+    ) -> "Matrix[_T_Ring]":
+        return Matrix._matmul(self, other)
+
+    def __rmatmul__(
+        self: "Matrix[_T_Ring]", other: "Matrix[_T_Ring]"
+    ) -> "Matrix[_T_Ring]":
+        return Matrix._matmul(other, self)
 
     # * small note for above
     # i dont like how some of the private methods are static but others arent
@@ -173,9 +184,16 @@ class Matrix(Generic[_T_Ring]):
         data = tuple(tuple(int(i == j) for j in range(size)) for i in range(size))
         return Matrix(*data, num_type=num_type)
 
+    @overload
+    def __pow__(
+        self: "Matrix[_T_Ring]", value: Literal["T"] | int
+    ) -> "Matrix[_T_Ring]": ...
+    @overload
     def __pow__(
         self: "Matrix[_T_Field]", value: Literal["T"] | int
-    ) -> "Matrix[_T_Ring] | Matrix[_T_Field]":
+    ) -> "Matrix[_T_Field]": ...
+
+    def __pow__(self, value):
         if value == "T":
             return Matrix(
                 *(
@@ -189,7 +207,7 @@ class Matrix(Generic[_T_Ring]):
 
             # TODO: something like this instead of cast
             # assert isinstance(self.num_type, Callable[[int], _T_Field])
-            num_type = cast("Callable[[int], _T_Field]", self.num_type)
+            num_type = self.num_type
 
             if value == 0:
                 return Matrix.ident(self.rows, num_type=num_type)
@@ -199,35 +217,37 @@ class Matrix(Generic[_T_Ring]):
 
                 from .gaussian_elim import to_rref
 
-                ops = to_rref(self, allow_zeroes=False)[1]
-                inv = Matrix.ident(self.rows, num_type)
+                ops = to_rref(cast("Matrix[Field]", self), allow_zeroes=False)[1]
+                inv: "Matrix[Field]" = Matrix.ident(self.rows, num_type)
                 for op in ops:
                     inv = op.apply(inv)
                 return inv ** abs(value)
-            return self @ (self ** (value - 1))
+            # return self @ (self ** (value - 1))
+            return cast("Matrix[Ring]", self) @ cast("Matrix[Ring]", self)
 
         return NotImplemented
 
-    def null(self) -> list[Vector]:
+    def null(self: "Matrix[_T_Field]") -> list[Vector[_T_Field]]:
+        from .gaussian_elim import to_rref
+
+        mat = to_rref(self)[0]
         params = {}
         pivots = {}
-        for i in range(self.rows):
-            for j in range(self.cols):
-                if self[i, j] == self.num_type(1):
+        for i in range(mat.rows):
+            for j in range(mat.cols):
+                if mat[i, j] == mat.num_type(1):
                     pivots[j] = i
                     break
-        for j in range(self.cols):
+        for j in range(mat.cols):
             if j not in pivots:
-                params.setdefault(j, [self.num_type(0)] * self.cols)[j] = self.num_type(
-                    1
-                )
+                params.setdefault(j, [mat.num_type(0)] * mat.cols)[j] = mat.num_type(1)
             else:
-                for j_ in range(j + 1, self.cols):
-                    if self[pivots[j], j_] != self.num_type(0):
-                        params.setdefault(j_, [self.num_type(0)] * self.cols)[j] = (
-                            -self[pivots[j], j_]
-                        )
-        return [Vector(*params[k]) for k in params]
+                for j_ in range(j + 1, mat.cols):
+                    if mat[pivots[j], j_] != mat.num_type(0):
+                        params.setdefault(j_, [mat.num_type(0)] * mat.cols)[j] = -mat[
+                            pivots[j], j_
+                        ]
+        return [Vector(*params[k], num_type=mat.num_type) for k in params]
 
     def det(self: "Matrix[_T_Field]") -> _T_Field:
         """
