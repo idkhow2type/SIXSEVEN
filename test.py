@@ -306,6 +306,169 @@ class TestFieldSymbol(unittest.TestCase):
         s=(-S('B')/S('A'))
         self.assertEqual(S('A')*s,-S('B'))
 
+    # Tests for the evaluate method
+    def test_evaluate_simple_variable(self):
+        """Test evaluating a simple variable with a mapping"""
+        x = FieldSymbol("x", Fraction)
+        result = x.evaluate({"x": FieldSymbol(5, Fraction)})
+        self.assertEqual(result, FieldSymbol(5, Fraction))
+
+    def test_evaluate_simple_variable_with_int(self):
+        """Test evaluating a variable with an integer mapping"""
+        x = FieldSymbol("x", Fraction)
+        result = x.evaluate({"x": 5})
+        self.assertEqual(result, FieldSymbol(5, Fraction))
+
+    def test_evaluate_simple_variable_with_fraction(self):
+        """Test evaluating a variable with a Fraction mapping"""
+        x = FieldSymbol("x", Fraction)
+        result = x.evaluate({"x": Fraction(1, 2)})
+        self.assertEqual(result, FieldSymbol(Fraction(1, 2), Fraction))
+
+    def test_evaluate_numeric_atom(self):
+        """Test evaluating a numeric atom"""
+        num = FieldSymbol(42, Fraction)
+        result = num.evaluate({})
+        self.assertEqual(result, FieldSymbol(42, Fraction))
+
+    def test_evaluate_unmapped_variable(self):
+        """Test evaluating a variable not in the mapping returns itself"""
+        x = FieldSymbol("x", Fraction)
+        result = x.evaluate({"y": 5})
+        self.assertEqual(result, x)
+
+    def test_evaluate_addition(self):
+        """Test evaluating a simple addition expression"""
+        x = FieldSymbol("x", Fraction)
+        expr = x + FieldSymbol(3, Fraction)
+        result = expr.evaluate({"x": 2})
+        self.assertEqual(result, FieldSymbol(5, Fraction))
+
+    def test_evaluate_subtraction(self):
+        """Test evaluating a simple subtraction expression"""
+        x = FieldSymbol("x", Fraction)
+        expr = x - FieldSymbol(2, Fraction)
+        result = expr.evaluate({"x": 7})
+        self.assertEqual(result, FieldSymbol(5, Fraction))
+
+    def test_evaluate_multiplication(self):
+        """Test evaluating a simple multiplication expression"""
+        x = FieldSymbol("x", Fraction)
+        expr = x * FieldSymbol(4, Fraction)
+        result = expr.evaluate({"x": 3})
+        self.assertEqual(result, FieldSymbol(12, Fraction))
+
+    def test_evaluate_division(self):
+        """Test evaluating a simple division expression"""
+        x = FieldSymbol("x", Fraction)
+        expr = x / FieldSymbol(2, Fraction)
+        result = expr.evaluate({"x": 6})
+        self.assertEqual(result, FieldSymbol(3, Fraction))
+
+    def test_evaluate_power(self):
+        """Test evaluating a power expression"""
+        x = FieldSymbol("x", Fraction)
+        expr = x ** FieldSymbol(3, Fraction)
+        result = expr.evaluate({"x": 2})
+        self.assertEqual(result, FieldSymbol(8, Fraction))
+
+    def test_evaluate_nested_expression(self):
+        """Test evaluating a nested expression"""
+        x = FieldSymbol("x", Fraction)
+        y = FieldSymbol("y", Fraction)
+        expr = (x + y) * FieldSymbol(2, Fraction)
+        result = expr.evaluate({"x": 1, "y": 2})
+        self.assertEqual(result, FieldSymbol(6, Fraction))
+
+    def test_evaluate_deep_nesting(self):
+        """Test evaluating a deeply nested expression"""
+        x = FieldSymbol("x", Fraction)
+        expr = ((x + FieldSymbol(1, Fraction)) * FieldSymbol(2, Fraction)) - FieldSymbol(3, Fraction)
+        result = expr.evaluate({"x": 5})
+        self.assertEqual(result, FieldSymbol(9, Fraction))
+
+    def test_evaluate_multiple_variables(self):
+        """Test evaluating an expression with multiple variables"""
+        x = FieldSymbol("x", Fraction)
+        y = FieldSymbol("y", Fraction)
+        z = FieldSymbol("z", Fraction)
+        expr = x + y + z
+        result = expr.evaluate({"x": 1, "y": 2, "z": 3})
+        self.assertEqual(result, FieldSymbol(6, Fraction))
+
+    def test_evaluate_same_variable_multiple_times(self):
+        """Test evaluating an expression where the same variable appears multiple times"""
+        x = FieldSymbol("x", Fraction)
+        expr = x + x
+        result = expr.evaluate({"x": 5})
+        self.assertEqual(result, FieldSymbol(10, Fraction))
+
+    def test_evaluate_fraction_arithmetic(self):
+        """Test evaluating with Fraction field elements"""
+        x = FieldSymbol("x", Fraction)
+        expr = x / FieldSymbol(3, Fraction)
+        result = expr.evaluate({"x": Fraction(1, 2)})
+        self.assertEqual(result, FieldSymbol(Fraction(1, 6), Fraction))
+
+    def test_evaluate_field_symbol_mapping(self):
+        """Test using FieldSymbol values in the mapping dict"""
+        x = FieldSymbol("x", Fraction)
+        y = FieldSymbol("y", Fraction)
+        expr = x + FieldSymbol(1, Fraction)
+        result = expr.evaluate({"x": y})
+        self.assertEqual(result, y + FieldSymbol(1, Fraction))
+
+    def test_evaluate_complex_expression(self):
+        """Test evaluating a complex expression"""
+        x = FieldSymbol("x", Fraction)
+        y = FieldSymbol("y", Fraction)
+        expr = (x * y) + (FieldSymbol(2, Fraction) * x) - y
+        result = expr.evaluate({"x": 3, "y": 4})
+        # (3 * 4) + (2 * 3) - 4 = 12 + 6 - 4 = 14
+        self.assertEqual(result, FieldSymbol(14, Fraction))
+
+    def test_evaluate_with_partial_mappings(self):
+        """Test evaluating with partial variable mappings (some unmapped)"""
+        x = FieldSymbol("x", Fraction)
+        y = FieldSymbol("y", Fraction)
+        expr = x + y
+        result = expr.evaluate({"x": 3})
+        expected = FieldSymbol(3, Fraction) + y
+        self.assertEqual(result, expected)
+
+    def test_evaluate_power_chain(self):
+        """Test evaluating chained power expressions"""
+        x = FieldSymbol("x", Fraction)
+        expr = (x ** FieldSymbol(2, Fraction)) ** FieldSymbol(2, Fraction)
+        result = expr.evaluate({"x": 2})
+        self.assertEqual(result, FieldSymbol(16, Fraction))
+
+    def test_evaluate_division_chain(self):
+        """Test evaluating chained division expressions"""
+        x = FieldSymbol("x", Fraction)
+        expr = (x / FieldSymbol(2, Fraction)) / FieldSymbol(2, Fraction)
+        result = expr.evaluate({"x": 8})
+        self.assertEqual(result, FieldSymbol(2, Fraction))
+
+    def test_evaluate_subtraction_chain(self):
+        """Test evaluating chained subtraction"""
+        x = FieldSymbol("x", Fraction)
+        expr = x - FieldSymbol(1, Fraction) - FieldSymbol(2, Fraction)
+        result = expr.evaluate({"x": 10})
+        self.assertEqual(result, FieldSymbol(7, Fraction))
+
+    def test_evaluate_empty_mapping(self):
+        """Test evaluating with an empty mapping"""
+        x = FieldSymbol("x", Fraction)
+        result = x.evaluate({})
+        self.assertEqual(result, x)
+
+    def test_evaluate_numeric_only_expression(self):
+        """Test evaluating an expression with only numeric values"""
+        expr = FieldSymbol(2, Fraction) + FieldSymbol(3, Fraction)
+        result = expr.evaluate({})
+        self.assertEqual(result, FieldSymbol(5, Fraction))
+
 
 if __name__ == '__main__':
     unittest.main()

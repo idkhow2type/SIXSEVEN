@@ -19,6 +19,7 @@ class Field(Ring, Protocol):
     def __truediv__(self, other: Self, /) -> Self: ...
     def __rtruediv__(self, other: Self, /) -> Self: ...
 
+
 # * partial init with proper generics
 # from typing import TypeVar, Generic, Callable
 
@@ -40,8 +41,8 @@ class Field(Ring, Protocol):
 
 def Zmod(base: int, start=0):
     class _Zmod:
-        def __init__(self, num: 'int | _Zmod') -> None:
-            if isinstance(num,_Zmod):
+        def __init__(self, num: "int | _Zmod") -> None:
+            if isinstance(num, _Zmod):
                 assert num.base == base
                 self.num = num.num
             else:
@@ -130,9 +131,10 @@ class ReverseOrder:
 
     def __eq__(self, other):
         return self.value == other.value
-    
+
     def __repr__(self) -> str:
         return str(self.value)
+
 
 class Expr:
     @staticmethod
@@ -353,29 +355,12 @@ class FieldSymbol(Symbol[_T_Field]):
     def _is_compatible(self, value: object):
         return (
             isinstance(value, FieldSymbol) and self.num_type == value.num_type
-        ) or type(value) in [self.num_type,int,float]
+        ) or type(value) in [self.num_type, int, float]
 
     def _coerce(
         self, value: "FieldSymbol[_T_Field] | _T_Field | int | float"
     ) -> "FieldSymbol[_T_Field]":
         return value if isinstance(value, FieldSymbol) else self._S(value)
-
-    # TODO: redo this, also reorder the params
-    def _combine_atom_values(self, a: Expr, b: Expr, op: str):
-        # callers should only call this when a and b are numeric Atoms — enforce at runtime
-        if not (Expr.is_num(a) and Expr.is_num(b)):
-            raise TypeError("_combine_atom_values expects Atom instances")
-        if op == "+":
-            return self._S(a.value + b.value)
-        if op == "-":
-            return self._S(a.value - b.value)
-        if op == "*":
-            return self._S(a.value * b.value)
-        if op == "/":
-            return self._S(a.value / b.value)
-        if op == "**":
-            return self._S(a.value**b.value)
-        raise ValueError("unsupported op")
 
     def _add(self, value: "FieldSymbol[_T_Field]" | _T_Field | int | float):
         if not self._is_compatible(value):
@@ -395,7 +380,7 @@ class FieldSymbol(Symbol[_T_Field]):
 
         # combine numeric atoms
         if Expr.is_num(left.expr) and Expr.is_num(right.expr):
-            return self._combine_atom_values(left.expr, right.expr, "+")
+            return self._S(left.expr.value + right.expr.value)
 
         # combine existing +
         # (assumes associativity)
@@ -411,7 +396,9 @@ class FieldSymbol(Symbol[_T_Field]):
         )
 
         assert Expr.is_multiop(left.expr, "+") and Expr.is_multiop(right.expr, "+")
-        terms = tuple(merge(left.expr.terms, right.expr.terms, key=lambda x: x.multiorder()))
+        terms = tuple(
+            merge(left.expr.terms, right.expr.terms, key=lambda x: x.multiorder())
+        )
 
         cumm_scale: _T_Field = self.num_type(0)
         curr: Expr | None = None
@@ -464,7 +451,7 @@ class FieldSymbol(Symbol[_T_Field]):
 
         value = self._coerce(value)
 
-        return cast(FieldSymbol[_T_Field],value + self.num_type(-1) * self)
+        return cast(FieldSymbol[_T_Field], value + self.num_type(-1) * self)
 
     def _mul(self, value: "FieldSymbol[_T_Field]" | _T_Field | int | float):
         if not self._is_compatible(value):
@@ -502,11 +489,11 @@ class FieldSymbol(Symbol[_T_Field]):
                 # res.append((comm_term * self._S(term)).expr)
                 res += comm_term * self._S(term)
             # return self._S(MultiOp("+", *res))
-            return cast(FieldSymbol[_T_Field],res)
+            return cast(FieldSymbol[_T_Field], res)
 
         # combine numeric atoms
         if Expr.is_num(left.expr) and Expr.is_num(right.expr):
-            return self._combine_atom_values(left.expr, right.expr, "*")
+            return self._S(left.expr.value * right.expr.value)
 
         # combine existing *
         # (assumes associativity)
@@ -601,10 +588,13 @@ class FieldSymbol(Symbol[_T_Field]):
         if value == self._S(1):
             return self
         if Expr.is_binop(self.expr, "**"):
-            return cast(FieldSymbol[_T_Field],self._S(self.expr.left) ** (self._S(self.expr.right) * value))
+            return cast(
+                FieldSymbol[_T_Field],
+                self._S(self.expr.left) ** (self._S(self.expr.right) * value),
+            )
 
         if Expr.is_num(self.expr) and Expr.is_num(value.expr):
-            return self._combine_atom_values(self.expr, value.expr, "**")
+            return self._S(self.expr.value**value.expr.value)
 
         return self._S(BinOp(self.expr, "**", value.expr))
 
@@ -622,12 +612,39 @@ class FieldSymbol(Symbol[_T_Field]):
             return self._S(value.expr.left) ** (self._S(value.expr.right) * self)
 
         if Expr.is_num(self.expr) and Expr.is_num(value.expr):
-            return self._combine_atom_values(value.expr, self.expr, "**")
+            return self._S(value.expr.value**self.expr.value)
 
         return self._S(BinOp(value.expr, "**", self.expr))
 
     def __hash__(self) -> int:
         return hash(self.expr)
+
+    def evaluate(
+        self, mappings: dict[str, "FieldSymbol[_T_Field]" | _T_Field | int | float]
+    ) -> "FieldSymbol[_T_Field]":
+        if Expr.is_atom(self.expr):
+            return self._S(mappings.get(self.expr.value, self.expr))
+
+        expr = cast(BinOp | MultiOp, self.expr)
+        op = {
+            "+": lambda x, y: x + y,
+            "-": lambda x, y: x - y,
+            "*": lambda x, y: x * y,
+            "/": lambda x, y: x / y,
+            "**": lambda x, y: x**y,
+        }[expr.op]
+
+        if Expr.is_multiop(self.expr):
+            ans = self._S(self.expr.terms[0]).evaluate(mappings)
+            for i in range(1, len(self.expr.terms)):
+                ans = op(ans, self._S(self.expr.terms[i]).evaluate(mappings))
+            return ans
+
+        expr = cast(BinOp, self.expr)
+        return op(
+            self._S(expr.left).evaluate(mappings),
+            self._S(expr.right).evaluate(mappings),
+        )
 
 
 # so apparently there's this thing called sympy
@@ -636,10 +653,10 @@ class FieldSymbol(Symbol[_T_Field]):
 # not that we weren't already
 # but this is way out of hand for the original scope
 
-Fraction.__repr__ = lambda self: (  # type: ignore
-    str(self.numerator // self.denominator)  # type: ignore
-    if self.numerator % self.denominator == 0  # type: ignore
-    else f"{self.numerator}/{self.denominator}"  # type: ignore
+Fraction.__repr__ = lambda self: (
+    str(self.numerator // self.denominator)
+    if self.numerator % self.denominator == 0
+    else f"{self.numerator}/{self.denominator}"
 )
 
 __all__ = ["Ring", "Field", "Zmod", "Fraction", "FieldSymbol"]
