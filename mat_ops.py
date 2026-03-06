@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from typing import Generic, TypeVar
-from .number_system import Field
+from .number_system.num_types import Field
 from .matrix import Matrix
 
 _T_Field = TypeVar("_T_Field", bound=Field)

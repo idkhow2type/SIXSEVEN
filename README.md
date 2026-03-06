@@ -59,3 +59,4 @@ print(mat.det()) # this is the correct deteminant trust
 - [ ] Rewrite the entire add and mult term grouping again
     - No more sorting as preprocessing, really expensive and doesn't work that well
     - Still need sorting for display mostly, so who knows?
+- diagonalise

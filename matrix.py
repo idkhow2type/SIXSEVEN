@@ -134,19 +134,27 @@ class Matrix(Generic[_T_Ring]):
     __add__, __radd__ = _add, _add
 
     @staticmethod
-    def _sub(a, b: "Matrix[_T_Ring]") -> "Matrix[_T_Ring]":
+    def _sub(a: "Matrix[_T_Ring]", b: "Matrix[_T_Ring]") -> "Matrix[_T_Ring]":
         return Matrix(
             *(
                 tuple(a - b for a, b in zip(row_a, row_b))
                 for row_a, row_b in zip(a._data, b._data)
             ),
+            num_type=a.num_type,
         )
 
-    __sub__, __rsub__ = _sub, lambda a, b: Matrix._sub(b, a)
+    def __sub__(self: "Matrix[_T_Ring]", other: "Matrix[_T_Ring]") -> "Matrix[_T_Ring]":
+        return Matrix._sub(self, other)
+
+    def __rsub__(
+        self: "Matrix[_T_Ring]", other: "Matrix[_T_Ring]"
+    ) -> "Matrix[_T_Ring]":
+        return Matrix._sub(other, self)
 
     def _mul(self, num: _T_Ring):
         return Matrix(
             *([num * item for item in row] for row in self._data),
+            num_type=self.num_type,
         )
 
     __mul__, __rmul__ = _mul, _mul
@@ -227,7 +235,7 @@ class Matrix(Generic[_T_Ring]):
 
         return NotImplemented
 
-    def null(self: "Matrix[_T_Field]") -> list[Vector[_T_Field]]:
+    def null(self: "Matrix[_T_Field]") -> tuple[Vector[_T_Field], ...]:
         from .gaussian_elim import to_rref
 
         mat = to_rref(self)[0]
@@ -247,7 +255,7 @@ class Matrix(Generic[_T_Ring]):
                         params.setdefault(j_, [mat.num_type(0)] * mat.cols)[j] = -mat[
                             pivots[j], j_
                         ]
-        return [Vector(*params[k], num_type=mat.num_type) for k in params]
+        return tuple(Vector(*params[k], num_type=mat.num_type) for k in params)
 
     def det(self: "Matrix[_T_Field]") -> _T_Field:
         """
@@ -282,6 +290,16 @@ class Matrix(Generic[_T_Ring]):
                 mat = op.apply(mat)
 
         return ans
+
+    # might do this at some point, too much effort for now
+    # def diagonalise(self: "Matrix[_T_Field]") -> "Matrix[_T_Field]":
+    #     if self.rows != self.cols:
+    #         raise ValueError
+
+    #     def S(x) -> FieldSymbol[_T_Field]:
+    #         return FieldSymbol(x, self.num_type)
+
+    #     poly = (self - S("t") * Matrix.ident(self.rows, self.num_type)).det()
 
 
 T = "T"

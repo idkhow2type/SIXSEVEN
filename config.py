@@ -1,5 +1,5 @@
 from typing import TypedDict, Literal, Callable
-from .number_system import Fraction
+from .number_system.num_types import Fraction
 
 
 class _num_type(TypedDict):

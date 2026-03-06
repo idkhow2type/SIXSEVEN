@@ -1,5 +1,5 @@
 from typing import TypeVar
-from .number_system import Field
+from .number_system.num_types import Field
 from .matrix import Matrix
 from .mat_ops import *
 
