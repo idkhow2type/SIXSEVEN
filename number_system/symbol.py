@@ -4,6 +4,11 @@ from abc import ABC
 from .num_types import Field
 from heapq import merge
 
+
+T = TypeVar("T")
+_T_Field = TypeVar("_T_Field", bound=Field)
+
+
 class ReverseOrder:
     def __init__(self, value):
         self.value = value
@@ -30,7 +35,7 @@ class Expr:
         return isinstance(expr, Atom) and not isinstance(expr.value, str)
 
     @staticmethod
-    def is_var(expr: "Expr") -> TypeGuard["Atom"]:
+    def is_var(expr: "Expr") -> TypeGuard["Atom[str]"]:
         return isinstance(expr, Atom) and isinstance(expr.value, str)
 
     @staticmethod
@@ -127,8 +132,8 @@ class Expr:
 
 # totally stole this from cmput274
 # me when school actually teaches things
-class Atom(Expr):
-    def __init__(self, value) -> None:
+class Atom(Expr, Generic[T]):
+    def __init__(self, value: T) -> None:
         self.value = value
 
     def __repr__(self) -> str:
@@ -179,10 +184,6 @@ class MultiOp(Expr):
         return self.op == value.op and self.terms == value.terms
 
 
-T = TypeVar("T")
-_T_Field = TypeVar("_T_Field", bound=Field)
-
-
 class Symbol(ABC, Generic[T]):
     def __init__(
         self, symbol: "Any | Expr | Symbol", num_type: Callable[[Any], T]
@@ -204,14 +205,29 @@ class Symbol(ABC, Generic[T]):
         return str(self.expr)
 
     def __eq__(self, value: object) -> bool:
-        if not isinstance(value, Symbol):
-            return NotImplemented
-        return self.num_type == value.num_type and self.expr == value.expr
+        if isinstance(value, Symbol):
+            return self.num_type == value.num_type and self.expr == value.expr
+        if type(value) == self.num_type:
+            return self._S(value) == self
+        return NotImplemented
 
     @property
     def _S(self) -> Callable[..., Self]:
         """Constructor factory that returns instances of the concrete subclass."""
         return partial(self.__class__, num_type=self.num_type)
+
+    def get_vars(self) -> set[str]:
+        if Expr.is_atom(self.expr):
+            return set(self.expr.value) if Expr.is_var(self.expr) else set()
+
+        if Expr.is_multiop(self.expr):
+            ans = self._S(self.expr.terms[0]).get_vars()
+            for i in range(1, len(self.expr.terms)):
+                ans |= self._S(self.expr.terms[i]).get_vars()
+            return ans
+
+        expr = cast(BinOp, self.expr)
+        return self._S(expr.left).get_vars() | self._S(expr.right).get_vars()
 
 
 class FieldSymbol(Symbol[_T_Field]):
@@ -366,12 +382,9 @@ class FieldSymbol(Symbol[_T_Field]):
             comm_term = left
         if add_term != None and comm_term != None:
             assert Expr.is_multiop(add_term.expr, "+")
-            # res: list[Expr] = []
             res = self._S(0)
             for term in add_term.expr.terms:
-                # res.append((comm_term * self._S(term)).expr)
                 res += comm_term * self._S(term)
-            # return self._S(MultiOp("+", *res))
             return cast(FieldSymbol[_T_Field], res)
 
         # combine numeric atoms
@@ -528,5 +541,6 @@ class FieldSymbol(Symbol[_T_Field]):
             self._S(expr.left).evaluate(mappings),
             self._S(expr.right).evaluate(mappings),
         )
-    
-__all__ = ["FieldSymbol"]
+
+
+__all__ = ["FieldSymbol", "Symbol"]

@@ -1,8 +1,6 @@
 from fractions import Fraction
-from typing import Protocol, Self, Any, TypeVar, Generic, Callable, TypeGuard, cast
-from abc import ABC
+from typing import Protocol, Self, Callable, cast, ClassVar
 from functools import partial
-from heapq import merge
 
 
 # TODO: maybe make these support ints and floats
@@ -20,35 +18,22 @@ class Field(Ring, Protocol):
     def __rtruediv__(self, other: Self, /) -> Self: ...
 
 
-# * partial init with proper generics
-# from typing import TypeVar, Generic, Callable
+class Zmod:
+    base: ClassVar[int]
+    start: ClassVar[int]
 
-# T=TypeVar("T")
+    @staticmethod
+    def bind(base: int, start=0) -> type["Zmod"]:
+        return type(f"Z{base}", (Zmod,), {"base": base, "start": start})
 
-# class Base(Generic[T]):
-#     def __init__(self, arg:T, arg2:int) -> None:
-#         self.val=arg
-#         self.val2=arg2
-
-#     @staticmethod
-#     def make(arg: float):
-#         f: Callable[[int]] = lambda arg2: Base(arg, arg2)
-#         return f
-
-# b=Base.make(1)
-# b(2)
-
-
-class _Zmod:
-    def __init__(self, num: "int | _Zmod", base: int, start=0) -> None:
-        if isinstance(num, _Zmod):
-            assert num.base == base
+    def __init__(self, num: "int | Zmod") -> None:
+        assert isinstance(self.base, int)
+        if isinstance(num, Zmod):
+            assert num.base == self.base
             self.num = num.num
         else:
-            self.num: int = (num) % (base)
-        self.base = base
-        self.start = start
-        for i in range(base):
+            self.num: int = (num) % (self.base)
+        for i in range(self.base):
             if ((self.num * i) % (self.base)) == 1:
                 self.inv = i
                 break
@@ -62,67 +47,67 @@ class _Zmod:
     def __eq__(self, other) -> bool:
         if type(other) is int:
             return self.num == ((other) % (self.base))
-        if isinstance(other, _Zmod) and other.base == self.base:
+        if isinstance(other, Zmod) and other.base == self.base:
             return self.num == other.num
         return False
 
-    def _add(self, other: "_Zmod | int") -> "_Zmod":
+    def _add(self, other: "Zmod | int") -> "Zmod":
         if type(other) is int:
-            return _Zmod(((self.num + other) % (self.base)), self.base)
-        if isinstance(other, _Zmod) and other.base == self.base:
-            return _Zmod(((self.num + other.num) % (self.base)), self.base)
+            return type(self)(((self.num + other) % (self.base)))
+        if isinstance(other, Zmod) and other.base == self.base:
+            return type(self)(((self.num + other.num) % (self.base)))
         return NotImplemented
 
     __add__, __radd__ = _add, _add
 
-    def _mul(self, other: "_Zmod | int") -> "_Zmod":
+    def _mul(self, other: "Zmod | int") -> "Zmod":
         if type(other) is int:
-            return _Zmod(((self.num * other) % (self.base)), self.base)
-        if isinstance(other, _Zmod) and other.base == self.base:
-            return _Zmod(((self.num * other.num) % (self.base)), self.base)
+            return type(self)(((self.num * other) % (self.base)))
+        if isinstance(other, Zmod) and other.base == self.base:
+            return type(self)(((self.num * other.num) % (self.base)))
         return NotImplemented
 
     __mul__, __rmul__ = _mul, _mul
 
-    def __sub__(self, other: "_Zmod | int") -> "_Zmod":
+    def __sub__(self, other: "Zmod | int") -> "Zmod":
         if type(other) is int:
-            return _Zmod(((self.num - other) % (self.base)), self.base)
-        if isinstance(other, _Zmod) and other.base == self.base:
-            return _Zmod(((self.num - other.num) % (self.base)), self.base)
+            return type(self)(((self.num - other) % (self.base)))
+        if isinstance(other, Zmod) and other.base == self.base:
+            return type(self)(((self.num - other.num) % (self.base)))
         return NotImplemented
 
-    def __rsub__(self, other: "_Zmod | int") -> "_Zmod":
+    def __rsub__(self, other: "Zmod | int") -> "Zmod":
         if type(other) is int:
-            return _Zmod(((other - self.num) % (self.base)), self.base)
-        if isinstance(other, _Zmod) and other.base == self.base:
-            return _Zmod(((other.num - self.num) % (self.base)), self.base)
+            return type(self)(((other - self.num) % (self.base)))
+        if isinstance(other, Zmod) and other.base == self.base:
+            return type(self)(((other.num - self.num) % (self.base)))
         return NotImplemented
 
-    def __truediv__(self, other: "_Zmod | int") -> "_Zmod":
+    def __truediv__(self, other: "Zmod | int") -> "Zmod":
         if type(other) is int:
-            return _Zmod(
-                ((self.num * _Zmod(other, self.base).inv) % (self.base)), self.base
-            )
-        if isinstance(other, _Zmod) and other.base == self.base:
-            return _Zmod(((self.num * other.inv) % (self.base)), self.base)
+            return type(self)(((self.num * type(self)(other).inv) % (self.base)))
+        if isinstance(other, Zmod) and other.base == self.base:
+            return type(self)(((self.num * other.inv) % (self.base)))
         return NotImplemented
 
-    def __rtruediv__(self, other: "_Zmod | int") -> "_Zmod":
+    def __rtruediv__(self, other: "Zmod | int") -> "Zmod":
         if type(other) is int:
-            return _Zmod(((other * self.inv) % (self.base)), self.base)
-        if isinstance(other, _Zmod) and other.base == self.base:
-            return _Zmod(((other.num * self.inv) % (self.base)), self.base)
+            return type(self)(((other * self.inv) % (self.base)))
+        if isinstance(other, Zmod) and other.base == self.base:
+            return type(self)(((other.num * self.inv) % (self.base)))
         return NotImplemented
 
-    def __neg__(self) -> "_Zmod":
-        return _Zmod((-self.num) % (self.base), self.base)
+    def __neg__(self) -> "Zmod":
+        return type(self)((-self.num) % (self.base))
 
-    def __pos__(self) -> "_Zmod":
-        return _Zmod(self.num, self.base)
+    def __pos__(self) -> "Zmod":
+        return type(self)(self.num)
 
+    def __abs__(self):
+        return self.num
 
-def Zmod(base: int, start=0):
-    return partial(Zmod, base=base, start=start)
+    def __hash__(self) -> int:
+        return hash(self.num)
 
 
 # so apparently there's this thing called sympy
@@ -137,4 +122,4 @@ Fraction.__repr__ = lambda self: (
     else f"{self.numerator}/{self.denominator}"
 )
 
-__all__ = ["Ring", "Field", "Zmod", "Fraction", "_Zmod"]
+__all__ = ["Ring", "Field", "Fraction", "Zmod"]
