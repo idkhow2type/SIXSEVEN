@@ -409,13 +409,13 @@ class FieldSymbol(Symbol[_T_Field]):
             merge(left.expr.terms, right.expr.terms, key=lambda x: x.multiorder())
         )
 
-        cumm_pow: _T_Field = self.num_type(0)
+        cumm_pow: int = 0
         cumm_curr: FieldSymbol | None = None
         combined: list[FieldSymbol] = []
         for term in terms:
-            term_pow = self.num_type(1)
+            term_pow = 1
             if Expr.is_binop(term, "**") and Expr.is_num(term.right):
-                term_pow = cast(_T_Field, term.right.value)
+                term_pow = cast(int, term.right.value)
                 term = term.left
             term = self._S(term)
 
@@ -454,7 +454,7 @@ class FieldSymbol(Symbol[_T_Field]):
         if value == self._S(0):
             raise ZeroDivisionError
 
-        return cast(FieldSymbol[_T_Field], self * self._S(value ** self.num_type(-1)))
+        return cast(FieldSymbol[_T_Field], self * self._S(value**-1))
 
     def __rtruediv__(self, value: "FieldSymbol[_T_Field]" | _T_Field | int | float):
         if not self._is_compatible(value):
@@ -465,7 +465,7 @@ class FieldSymbol(Symbol[_T_Field]):
         # division by zero
         if self == self._S(0):
             raise ZeroDivisionError
-        return cast(FieldSymbol[_T_Field], value * self._S(self ** self.num_type(-1)))
+        return cast(FieldSymbol[_T_Field], value * self._S(self**-1))
 
     def __neg__(self):
         return self.num_type(-1) * self
@@ -473,44 +473,25 @@ class FieldSymbol(Symbol[_T_Field]):
     def __pos__(self):
         return self
 
-    def __pow__(self, value: "FieldSymbol[_T_Field]" | _T_Field | int | float):
-        if not self._is_compatible(value):
+    def __pow__(self, value: int):
+        if not isinstance(value, int):
             return NotImplemented
 
-        value = self._coerce(value)
-
-        if self == self._S(1) or value == self._S(0):
+        if self == self._S(1) or value == 0:
             return self._S(1)
-        if value == self._S(1):
+        if value == 1:
             return self
         if Expr.is_binop(self.expr, "**"):
+            assert Expr.is_num(self.expr.right) and isinstance(self.expr.right, int)
             return cast(
                 FieldSymbol[_T_Field],
-                self._S(self.expr.left) ** (self._S(self.expr.right) * value),
+                self._S(self.expr.left) ** (self.expr.right * value),
             )
 
-        if Expr.is_num(self.expr) and Expr.is_num(value.expr):
-            return self._S(self.expr.value**value.expr.value)
+        if Expr.is_num(self.expr):
+            return self._S(self.expr.value**value)
 
-        return self._S(BinOp(self.expr, "**", value.expr))
-
-    def __rpow__(self, value: "FieldSymbol[_T_Field]" | _T_Field | int | float):
-        if not self._is_compatible(value):
-            return NotImplemented
-
-        value = self._coerce(value)
-
-        if value == self._S(1) or self == self._S(0):
-            return self._S(1)
-        if self == self._S(1):
-            return value
-        if Expr.is_binop(value.expr, "**"):
-            return self._S(value.expr.left) ** (self._S(value.expr.right) * self)
-
-        if Expr.is_num(self.expr) and Expr.is_num(value.expr):
-            return self._S(value.expr.value**self.expr.value)
-
-        return self._S(BinOp(value.expr, "**", self.expr))
+        return self._S(BinOp(self.expr, "**", Atom(value)))
 
     def __hash__(self) -> int:
         return hash(self.expr)
@@ -537,10 +518,14 @@ class FieldSymbol(Symbol[_T_Field]):
             return ans
 
         expr = cast(BinOp, self.expr)
-        return op(
-            self._S(expr.left).evaluate(mappings),
-            self._S(expr.right).evaluate(mappings),
-        )
+        if expr.op != "**":
+            return op(
+                self._S(expr.left).evaluate(mappings),
+                self._S(expr.right).evaluate(mappings),
+            )
+        # this isnt very clean but whatever
+        assert Expr.is_num(expr.right) and isinstance(expr.right.value, int)
+        return self._S(expr.left).evaluate(mappings) ** expr.right.value
 
 
 __all__ = ["FieldSymbol", "Symbol"]
