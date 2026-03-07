@@ -57,7 +57,7 @@ class RowSwap(RowOperation[_T_Field]):
     def apply(self, mat):
         data = [list(row) for row in mat._data]
         data[self.row_a], data[self.row_b] = data[self.row_b], data[self.row_a]
-        return Matrix(*data)
+        return Matrix(*data,num_type=mat.num_type)
 
     def __repr__(self) -> str:
         return f"R{self.row_a} <-> R{self.row_b}"

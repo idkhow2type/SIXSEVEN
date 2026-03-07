@@ -95,7 +95,7 @@ class Expr:
         elif Expr.is_num(expr):
             op = 2
             # this might not work for everything
-            content = (2, (abs(expr.value),))
+            content = (2, (None,))
 
         return (ReverseOrder(deg), content, op)
         # return (content, op,deg)
@@ -124,7 +124,7 @@ class Expr:
             content = ((1, (expr.value,)),)
         elif Expr.is_num(expr):
             op = 2
-            content = ((2, (abs(expr.value),)),)
+            content = ((2, (None,)),)
 
         return (ReverseOrder(deg), content, op)
         # return (content, op,deg)
@@ -192,6 +192,7 @@ class Symbol(ABC, Generic[T]):
         self.num_type = num_type
         self.expr: Expr
         if isinstance(symbol, Symbol):
+            # TODO: check if the return types of .num_type are equal
             assert symbol.num_type == self.num_type
             self.expr = symbol.expr
         else:
@@ -251,10 +252,19 @@ class FieldSymbol(Symbol[_T_Field]):
         """
         super().__init__(symbol, num_type)
 
-    def _is_compatible(self, value: object):
-        return (
-            isinstance(value, FieldSymbol) and self.num_type == value.num_type
-        ) or type(value) in [self.num_type, int, float]
+    def _is_compatible(self, value):
+        if (isinstance(value, FieldSymbol) and self.num_type == value.num_type) or type(
+            value
+        ) in [self.num_type, int, float]:
+            return True
+        try:
+            value + self.num_type(0)  # type: ignore
+            value - self.num_type(0)  # type: ignore
+            value * self.num_type(0)  # type: ignore
+            value / self.num_type(1)  # type: ignore
+        except:
+            return False
+        return True
 
     def _coerce(
         self, value: "FieldSymbol[_T_Field] | _T_Field | int | float"
@@ -477,8 +487,13 @@ class FieldSymbol(Symbol[_T_Field]):
         if not isinstance(value, int):
             return NotImplemented
 
+            
         if self == self._S(1) or value == 0:
             return self._S(1)
+        if self == self._S(0):
+            if value < 0:
+                raise ZeroDivisionError
+            return self._S(0)
         if value == 1:
             return self
         if Expr.is_binop(self.expr, "**"):

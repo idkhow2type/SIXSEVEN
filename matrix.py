@@ -1,5 +1,6 @@
 from typing import TypeVar, Generic, Sequence, Callable, Any, cast, Literal, overload
 from .number_system import *
+from .roots import *
 from .config import CONFIG
 
 _T_Ring = TypeVar("_T_Ring", bound=Ring)
@@ -187,7 +188,8 @@ class Matrix(Generic[_T_Ring]):
 
     @staticmethod
     def ident(
-        size: int, num_type: Callable[[int], _T_RingStatic] = float
+        size: int,
+        num_type: Callable[[int], _T_RingStatic] = CONFIG["num_type"]["default"],
     ) -> "Matrix[_T_RingStatic]":
         data = tuple(tuple(int(i == j) for j in range(size)) for i in range(size))
         return Matrix(*data, num_type=num_type)
@@ -201,13 +203,14 @@ class Matrix(Generic[_T_Ring]):
         self: "Matrix[_T_Field]", value: Literal["T"] | int
     ) -> "Matrix[_T_Field]": ...
 
-    def __pow__(self, value):
+    def __pow__(self, value: Literal["T"] | int):
         if value == "T":
             return Matrix(
                 *(
                     [self._data[j][i] for j in range(self.rows)]
                     for i in range(self.cols)
-                )
+                ),
+                num_type=self.num_type,
             )
         if isinstance(value, int):
             if self.rows != self.cols:
@@ -291,15 +294,45 @@ class Matrix(Generic[_T_Ring]):
 
         return ans
 
-    # might do this at some point, too much effort for now
-    # def diagonalise(self: "Matrix[_T_Field]") -> "Matrix[_T_Field]":
-    #     if self.rows != self.cols:
-    #         raise ValueError
+    def diagonalise(
+        self: "Matrix[_T_Field]",
+    ) -> tuple["Matrix[_T_Field]", "Matrix[_T_Field]"]:
+        """
+        returns (D, P)
+        """
+        if self.rows != self.cols:
+            raise ValueError
 
-    #     def S(x) -> FieldSymbol[_T_Field]:
-    #         return FieldSymbol(x, self.num_type)
+        def S(x) -> FieldSymbol[_T_Field]:
+            return FieldSymbol(x, self.num_type)
 
-    #     poly = (self - S("t") * Matrix.ident(self.rows, self.num_type)).det()
+        A = Matrix(*self._data, num_type=S)
+
+        poly = (A - S("t") * Matrix.ident(self.rows, S)).det()
+
+        roots: dict[_T_Field, int] = {}
+        for root in single_roots(poly):
+            roots[root] = roots.get(root, 0) + 1
+
+        _D = []
+        _P = []
+        for root, count in roots.items():
+            null = (self - root * Matrix.ident(self.rows, self.num_type)).null()
+            if len(null) != count:
+                raise ValueError
+            _P.extend(null)
+            _D.extend([root] * count)
+
+        data = tuple(
+            tuple(_D[i] if i == j else 0 for j in range(self.rows))
+            for i in range(self.rows)
+        )
+
+        # print(D,P)
+        return (
+            Matrix(*_P, num_type=self.num_type) ** T,
+            Matrix(*data, num_type=self.num_type),
+        )
 
 
 T = "T"

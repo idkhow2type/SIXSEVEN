@@ -4,7 +4,7 @@ from .number_system.num_types import Fraction
 
 class _num_type(TypedDict):
     missing: Literal["infer", "default"]
-    default: None | Callable
+    default: Callable
 
 
 class Config(TypedDict):
