@@ -1,12 +1,13 @@
 from typing import TypeGuard, TypeVar, Generic, Any, Callable, Self, cast
 from functools import partial
 from abc import ABC
-from .num_types import Field
+from .num_types import Field, Ring
 from heapq import merge
 
 
 T = TypeVar("T")
 _T_Field = TypeVar("_T_Field", bound=Field)
+_T_Ring = TypeVar("_T_Ring", bound=Ring)
 
 
 class ReverseOrder:
@@ -78,7 +79,7 @@ class Expr:
             if Expr.is_num(expr.right):
                 deg = (1, abs(expr.right.value))
             else:
-                deg = (0, expr.right)
+                deg = (0, expr.right.multiorder())
             expr = expr.left
 
         op = None
@@ -108,7 +109,7 @@ class Expr:
             if Expr.is_num(expr.right):
                 deg = (1, abs(expr.right.value))
             else:
-                deg = (0, expr.right)
+                deg = (0, expr.right.multiorder())
             expr = expr.left
 
         op = None
@@ -231,9 +232,9 @@ class Symbol(ABC, Generic[T]):
         return self._S(expr.left).get_vars() | self._S(expr.right).get_vars()
 
 
-class FieldSymbol(Symbol[_T_Field]):
+class CommRingSymbol(Symbol[_T_Ring]):
     def __init__(
-        self, symbol: "Any | Expr | FieldSymbol", num_type: Callable[[Any], _T_Field]
+        self, symbol: Any | Expr | Self, num_type: Callable[[Any], _T_Ring]
     ) -> None:
         """
         Implements field operation for symbolic values
@@ -253,10 +254,12 @@ class FieldSymbol(Symbol[_T_Field]):
         super().__init__(symbol, num_type)
 
     def _is_compatible(self, value):
-        if (isinstance(value, FieldSymbol) and self.num_type == value.num_type) or type(
-            value
-        ) in [self.num_type, int, float]:
+        if (
+            isinstance(value, type(self))
+            and self.num_type == cast(Symbol, value).num_type
+        ) or type(value) in [self.num_type, int, float]:
             return True
+        # TODO: this is really just sympy compat, we dont wanna support this
         try:
             value + self.num_type(0)  # type: ignore
             value - self.num_type(0)  # type: ignore
@@ -266,12 +269,10 @@ class FieldSymbol(Symbol[_T_Field]):
             return False
         return True
 
-    def _coerce(
-        self, value: "FieldSymbol[_T_Field] | _T_Field | int | float"
-    ) -> "FieldSymbol[_T_Field]":
-        return value if isinstance(value, FieldSymbol) else self._S(value)
+    def _coerce(self, value: Self | _T_Ring | int | float) -> Self:
+        return cast(Self, value) if isinstance(value, type(self)) else self._S(value)
 
-    def _add(self, value: "FieldSymbol[_T_Field]" | _T_Field | int | float):
+    def _add(self, value: Self | _T_Ring | int | float):
         if not self._is_compatible(value):
             return NotImplemented
 
@@ -309,20 +310,20 @@ class FieldSymbol(Symbol[_T_Field]):
             merge(left.expr.terms, right.expr.terms, key=lambda x: x.multiorder())
         )
 
-        cumm_scale: _T_Field = self.num_type(0)
+        cumm_scale: _T_Ring = self.num_type(0)
         curr: Expr | None = None
-        combined: list[FieldSymbol] = []
+        combined: list[Self] = []
         for term in terms:
             scale = self.num_type(1)
             if Expr.is_multiop(term, "*") and Expr.is_num(term.terms[-1]):
-                scale = cast(_T_Field, term.terms[-1].value)
+                scale = cast(_T_Ring, term.terms[-1].value)
                 if len(term.terms) > 2:
                     term = MultiOp("*", *term.terms[:-1])
                 else:
                     assert len(term.terms) > 0
                     term = term.terms[0]
             elif Expr.is_num(term):
-                scale = cast(_T_Field, term.value)
+                scale = cast(_T_Ring, term.value)
                 term = Atom(self.num_type(1))
 
             if curr == None:
@@ -332,11 +333,11 @@ class FieldSymbol(Symbol[_T_Field]):
                 cumm_scale += scale
             else:
                 if cumm_scale != self.num_type(0):
-                    combined.append(self._S(curr) * cumm_scale)
+                    combined.append(cast(Self, self._S(curr) * cumm_scale))
                 cumm_scale = scale
                 curr = term
         if cumm_scale != self.num_type(0):
-            combined.append(self._S(curr) * cumm_scale)
+            combined.append(cast(Self, self._S(curr) * cumm_scale))
 
         if len(combined) == 0:
             return self._S(0)
@@ -346,7 +347,7 @@ class FieldSymbol(Symbol[_T_Field]):
 
     __add__, __radd__ = _add, _add
 
-    def __sub__(self, value: "FieldSymbol[_T_Field]" | _T_Field | int | float):
+    def __sub__(self, value: Self | _T_Ring | int | float):
         if not self._is_compatible(value):
             return NotImplemented
 
@@ -354,15 +355,15 @@ class FieldSymbol(Symbol[_T_Field]):
 
         return self + self.num_type(-1) * value
 
-    def __rsub__(self, value: "FieldSymbol[_T_Field]" | _T_Field | int | float):
+    def __rsub__(self, value: Self | _T_Ring | int | float):
         if not self._is_compatible(value):
             return NotImplemented
 
         value = self._coerce(value)
 
-        return cast(FieldSymbol[_T_Field], value + self.num_type(-1) * self)
+        return cast(Self, value + self.num_type(-1) * self)
 
-    def _mul(self, value: "FieldSymbol[_T_Field]" | _T_Field | int | float):
+    def _mul(self, value: Self | _T_Ring | int | float):
         if not self._is_compatible(value):
             return NotImplemented
 
@@ -395,7 +396,7 @@ class FieldSymbol(Symbol[_T_Field]):
             res = self._S(0)
             for term in add_term.expr.terms:
                 res += comm_term * self._S(term)
-            return cast(FieldSymbol[_T_Field], res)
+            return cast(Self, res)
 
         # combine numeric atoms
         if Expr.is_num(left.expr) and Expr.is_num(right.expr):
@@ -419,21 +420,19 @@ class FieldSymbol(Symbol[_T_Field]):
             merge(left.expr.terms, right.expr.terms, key=lambda x: x.multiorder())
         )
 
-        cumm_pow: int = 0
-        cumm_curr: FieldSymbol | None = None
-        combined: list[FieldSymbol] = []
+        cumm_pow: int | CommRingSymbol[int] = 0
+        cumm_curr: Self | None = None
+        combined: list[Self] = []
         for term in terms:
             term_pow = 1
-            if Expr.is_binop(term, "**") and Expr.is_num(term.right):
-                term_pow = cast(int, term.right.value)
+            if Expr.is_binop(term, "**"):
+                term_pow = CommRingSymbol(term.right,int)
                 term = term.left
             term = self._S(term)
 
             if cumm_curr == None:
                 cumm_curr = term
                 cumm_pow = term_pow
-            elif Expr.is_num(cumm_curr.expr) and Expr.is_num(term.expr):
-                cumm_curr *= term
             elif cumm_curr == term:
                 cumm_pow += term_pow
             else:
@@ -454,40 +453,24 @@ class FieldSymbol(Symbol[_T_Field]):
 
     __mul__, __rmul__ = _mul, _mul
 
-    def __truediv__(self, value: "FieldSymbol[_T_Field]" | _T_Field | int | float):
-        if not self._is_compatible(value):
-            return NotImplemented
-
-        value = self._coerce(value)
-
-        # division by zero
-        if value == self._S(0):
-            raise ZeroDivisionError
-
-        return cast(FieldSymbol[_T_Field], self * self._S(value**-1))
-
-    def __rtruediv__(self, value: "FieldSymbol[_T_Field]" | _T_Field | int | float):
-        if not self._is_compatible(value):
-            return NotImplemented
-
-        value = self._coerce(value)
-
-        # division by zero
-        if self == self._S(0):
-            raise ZeroDivisionError
-        return cast(FieldSymbol[_T_Field], value * self._S(self**-1))
-
     def __neg__(self):
         return self.num_type(-1) * self
 
     def __pos__(self):
         return self
 
-    def __pow__(self, value: int):
-        if not isinstance(value, int):
+    def __pow__(self, value: "int | CommRingSymbol[int]") -> Self:
+        if (not (isinstance(value, int) or isinstance(value, CommRingSymbol))) or (
+            isinstance(value, CommRingSymbol) and not isinstance(value.num_type(0), int)
+        ):
             return NotImplemented
 
-            
+        if isinstance(value, CommRingSymbol):
+            if Expr.is_num(value.expr):
+                value = cast(int, value.expr.value)
+            else:
+                return self._S(BinOp(self.expr, "**", value.expr))
+
         if self == self._S(1) or value == 0:
             return self._S(1)
         if self == self._S(0):
@@ -499,7 +482,7 @@ class FieldSymbol(Symbol[_T_Field]):
         if Expr.is_binop(self.expr, "**"):
             assert Expr.is_num(self.expr.right) and isinstance(self.expr.right, int)
             return cast(
-                FieldSymbol[_T_Field],
+                Self,
                 self._S(self.expr.left) ** (self.expr.right * value),
             )
 
@@ -511,9 +494,7 @@ class FieldSymbol(Symbol[_T_Field]):
     def __hash__(self) -> int:
         return hash(self.expr)
 
-    def evaluate(
-        self, mappings: dict[str, "FieldSymbol[_T_Field]" | _T_Field | int | float]
-    ) -> "FieldSymbol[_T_Field]":
+    def evaluate(self, mappings: dict[str, Self | _T_Field | int | float]) -> Self:
         if Expr.is_atom(self.expr):
             return self._S(mappings.get(self.expr.value, self.expr))
 
@@ -543,4 +524,29 @@ class FieldSymbol(Symbol[_T_Field]):
         return self._S(expr.left).evaluate(mappings) ** expr.right.value
 
 
-__all__ = ["FieldSymbol", "Symbol"]
+class FieldSymbol(CommRingSymbol[_T_Field]):
+    def __truediv__(self, value: Self | _T_Field | int | float):
+        if not self._is_compatible(value):
+            return NotImplemented
+
+        value = self._coerce(value)
+
+        # division by zero
+        if value == self._S(0):
+            raise ZeroDivisionError
+
+        return cast(Self, self * self._S(value**-1))
+
+    def __rtruediv__(self, value: Self | _T_Field | int | float):
+        if not self._is_compatible(value):
+            return NotImplemented
+
+        value = self._coerce(value)
+
+        # division by zero
+        if self == self._S(0):
+            raise ZeroDivisionError
+        return cast(Self, value * self._S(self**-1))
+
+
+__all__ = ["CommRingSymbol", "FieldSymbol", "Symbol"]
