@@ -2,71 +2,11 @@ from typing import TypeVar, Generic, Sequence, Callable, Any, cast, Literal, ove
 from .number_system import *
 from .roots import *
 from .config import CONFIG
+from .vector import Vector, dot
 
 _T_Ring = TypeVar("_T_Ring", bound=Ring)
 _T_Field = TypeVar("_T_Field", bound=Field)
-_T_In = TypeVar("_T_In")
 _T_RingStatic = TypeVar("_T_RingStatic", bound=Ring)
-
-
-class Vector(Generic[_T_Ring], Sequence):
-    def __init__(
-        self, *data: Any, num_type: Callable[[_T_In], _T_Ring] | None = None
-    ) -> None:
-        self.num_type = num_type or (
-            type(data[0])
-            if CONFIG["num_type"]["missing"] == "infer"
-            else cast(Callable[[Any], _T_Ring], CONFIG["num_type"]["default"])
-        )
-        self._data = tuple(self.num_type(item) for item in data)
-
-    def __repr__(self) -> str:
-        match CONFIG["repr_type"]:
-            case "default":
-                return f"({' '.join(str(i) for i in self._data)})"
-            case "latex":
-                return f"\\begin{{pmatrix}}{'\\\\'.join(str(i) for i in self._data)}\\end{{pmatrix}}"
-
-    def __len__(self) -> int:
-        return len(self._data)
-
-    def __getitem__(self, i):
-        return self._data[i]
-
-    def __iter__(self):
-        return iter(self._data)
-
-    def _add(self, other: "Vector[_T_Ring]") -> "Vector[_T_Ring]":
-        if len(self) != len(other):
-            raise ValueError
-        return Vector(*(a + b for a, b in zip(self, other)), num_type=self.num_type)
-
-    __add__, __radd__ = _add, _add
-
-    def __sub__(self, other: "Vector[_T_Ring]") -> "Vector[_T_Ring]":
-        if len(self) != len(other):
-            raise ValueError
-        return Vector(*(a - b for a, b in zip(self, other)), num_type=self.num_type)
-
-    def __rsub__(self, other: "Vector[_T_Ring]") -> "Vector[_T_Ring]":
-        if len(self) != len(other):
-            raise ValueError
-        return Vector(*(b - a for a, b in zip(self, other)), num_type=self.num_type)
-
-    def _mul(self, other: _T_Ring) -> "Vector[_T_Ring]":
-        return Vector(*(item * other for item in self._data), num_type=self.num_type)
-
-    __mul__, __rmul__ = _mul, _mul
-
-
-def dot(vec_a: Vector[_T_Ring], vec_b: Vector[_T_Ring]) -> _T_Ring:
-    if len(vec_a) != len(vec_b):
-        raise ValueError
-
-    ans: _T_Ring = cast(_T_Ring, 0)
-    for a, b in zip(vec_a, vec_b):
-        ans += a * b
-    return ans
 
 
 class Matrix(Generic[_T_Ring]):
@@ -238,103 +178,110 @@ class Matrix(Generic[_T_Ring]):
 
         return NotImplemented
 
-    def null(self: "Matrix[_T_Field]") -> tuple[Vector[_T_Field], ...]:
-        from .gaussian_elim import to_rref
 
-        mat = to_rref(self)[0]
-        params = {}
-        pivots = {}
-        for i in range(mat.rows):
-            for j in range(mat.cols):
-                if mat[i, j] == mat.num_type(1):
-                    pivots[j] = i
-                    break
+def null(mat: "Matrix[_T_Field]") -> tuple[Vector[_T_Field], ...]:
+    from .gaussian_elim import to_rref
+
+    mat = to_rref(mat)[0]
+    params = {}
+    pivots = {}
+    for i in range(mat.rows):
         for j in range(mat.cols):
-            if j not in pivots:
-                params.setdefault(j, [mat.num_type(0)] * mat.cols)[j] = mat.num_type(1)
+            if mat[i, j] == mat.num_type(1):
+                pivots[j] = i
+                break
+    for j in range(mat.cols):
+        if j not in pivots:
+            params.setdefault(j, [mat.num_type(0)] * mat.cols)[j] = mat.num_type(1)
+        else:
+            for j_ in range(j + 1, mat.cols):
+                if mat[pivots[j], j_] != mat.num_type(0):
+                    params.setdefault(j_, [mat.num_type(0)] * mat.cols)[j] = -mat[
+                        pivots[j], j_
+                    ]
+    return tuple(Vector(*params[k], num_type=mat.num_type) for k in params)
+
+
+def det(mat: "Matrix[_T_Field]") -> _T_Field:
+    """
+    Note: Assumes ring is commutative
+    """
+    if mat.rows != mat.cols:
+        raise ValueError
+
+    from .mat_ops import RowSwap, RowAdd
+
+    mat = mat
+    ans = mat.num_type(1)
+
+    for i in range(mat.cols):
+        if mat[i, i] == mat.num_type(0):
+            for r in range(i, mat.rows):
+                if mat[r, i] != mat.num_type(0):
+                    op = RowSwap(i, r)
+                    mat = op.apply(mat)
+                    ans *= mat.num_type(-1)
+                    break
             else:
-                for j_ in range(j + 1, mat.cols):
-                    if mat[pivots[j], j_] != mat.num_type(0):
-                        params.setdefault(j_, [mat.num_type(0)] * mat.cols)[j] = -mat[
-                            pivots[j], j_
-                        ]
-        return tuple(Vector(*params[k], num_type=mat.num_type) for k in params)
+                return mat.num_type(0)
 
-    def det(self: "Matrix[_T_Field]") -> _T_Field:
-        """
-        Note: Assumes ring is commutative
-        """
-        if self.rows != self.cols:
+        ans *= mat[i, i]
+
+        for r in range(i + 1, mat.rows):
+            s = -mat[r, i] / mat[i, i]
+            if s == mat.num_type(0):
+                continue
+            op = RowAdd(r, s, i)
+            mat = op.apply(mat)
+
+    return ans
+
+
+def diagonalise(
+    mat: "Matrix[_T_Field]",
+) -> tuple["Matrix[_T_Field]", "Matrix[_T_Field]"]:
+    """
+    returns (D, P)
+    """
+    if mat.rows != mat.cols:
+        raise ValueError
+
+    def S(x) -> FieldSymbol[_T_Field]:
+        return FieldSymbol(x, mat.num_type)
+
+    A = Matrix(*mat._data, num_type=S)
+
+    poly = det(A - S("t") * Matrix.ident(mat.rows, S))
+
+    roots: dict[_T_Field, int] = {}
+    for root in single_roots(poly):
+        roots[root] = roots.get(root, 0) + 1
+
+    _D = []
+    _P = []
+    for root, count in roots.items():
+        null_basis = null(mat - root * Matrix.ident(mat.rows, mat.num_type))
+        if len(null_basis) != count:
             raise ValueError
+        _P.extend(null_basis)
+        _D.extend([root] * count)
 
-        from .mat_ops import RowSwap, RowAdd
+    data = tuple(
+        tuple(_D[i] if i == j else 0 for j in range(mat.rows)) for i in range(mat.rows)
+    )
 
-        mat = self
-        ans = self.num_type(1)
+    return (
+        Matrix(*_P, num_type=mat.num_type) ** T,
+        Matrix(*data, num_type=mat.num_type),
+    )
 
-        for i in range(mat.cols):
-            if mat[i, i] == self.num_type(0):
-                for r in range(i, mat.rows):
-                    if mat[r, i] != self.num_type(0):
-                        op = RowSwap(i, r)
-                        mat = op.apply(mat)
-                        ans *= self.num_type(-1)
-                        break
-                else:
-                    return self.num_type(0)
 
-            ans *= mat[i, i]
-
-            for r in range(i + 1, mat.rows):
-                s = -mat[r, i] / mat[i, i]
-                if s == self.num_type(0):
-                    continue
-                op = RowAdd(r, s, i)
-                mat = op.apply(mat)
-
-        return ans
-
-    def diagonalise(
-        self: "Matrix[_T_Field]",
-    ) -> tuple["Matrix[_T_Field]", "Matrix[_T_Field]"]:
-        """
-        returns (D, P)
-        """
-        if self.rows != self.cols:
-            raise ValueError
-
-        def S(x) -> FieldSymbol[_T_Field]:
-            return FieldSymbol(x, self.num_type)
-
-        A = Matrix(*self._data, num_type=S)
-
-        poly = (A - S("t") * Matrix.ident(self.rows, S)).det()
-
-        roots: dict[_T_Field, int] = {}
-        for root in single_roots(poly):
-            roots[root] = roots.get(root, 0) + 1
-
-        _D = []
-        _P = []
-        for root, count in roots.items():
-            null = (self - root * Matrix.ident(self.rows, self.num_type)).null()
-            if len(null) != count:
-                raise ValueError
-            _P.extend(null)
-            _D.extend([root] * count)
-
-        data = tuple(
-            tuple(_D[i] if i == j else 0 for j in range(self.rows))
-            for i in range(self.rows)
-        )
-
-        # print(D,P)
-        return (
-            Matrix(*_P, num_type=self.num_type) ** T,
-            Matrix(*data, num_type=self.num_type),
-        )
+def trace(mat: Matrix):
+    if mat.rows != mat.cols:
+        raise ValueError
+    return sum(mat[i, i] for i in range(mat.rows))
 
 
 T = "T"
 
-__all__ = ["Vector", "Matrix", "T", "dot"]
+__all__ = ["Vector", "Matrix", "T", "dot", "trace"]

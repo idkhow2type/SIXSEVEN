@@ -36,7 +36,7 @@ mat = Matrix(
     num_type=S
 )
 
-print(mat.det()) # this is the correct deteminant trust
+print(det(mat)) # this is the correct deteminant trust
 ```
 
 ## TODOS:

@@ -5,3 +5,4 @@ from .number_system import *
 from .gaussian_elim import *
 from .permute import *
 from .roots import *
+from .vector import *

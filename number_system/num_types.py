@@ -52,7 +52,7 @@ class Zmod(Ring):
             return self.num == ((other) % (self.base))
         if isinstance(other, Zmod) and other.base == self.base:
             return self.num == other.num
-        return False
+        return NotImplemented
 
     def _add(self, other: "Zmod | int") -> Self:
         if type(other) is int:
